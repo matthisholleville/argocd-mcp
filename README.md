@@ -1,0 +1,200 @@
+<p align="center">
+  <img src="https://argo-cd.readthedocs.io/en/stable/assets/logo.png" alt="ArgoCD" width="140" />
+</p>
+
+<h1 align="center">argocd-mcp</h1>
+
+<p align="center">
+  <strong>The entire ArgoCD API, exposed to LLMs via MCP.</strong><br/>
+  103+ endpoints. 2 tools. Zero hardcoded handlers.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#how-it-works">How It Works</a> &bull;
+  <a href="#oauth-via-argocd-dex-per-user-rbac">OAuth</a> &bull;
+  <a href="#configuration">Configuration</a>
+</p>
+
+---
+
+Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. When ArgoCD adds a new feature, you wait for the maintainer to add it.
+
+**argocd-mcp** takes a different approach, inspired by [Cloudflare's MCP server](https://github.com/cloudflare/mcp) which covers 2500+ endpoints with only 2 tools. It reads ArgoCD's OpenAPI spec at startup and exposes every endpoint through just 2 tools: `search` and `execute`. New ArgoCD version? Restart the server. Done.
+
+- **103+ endpoints**, 2 tools, ~200 tokens of system prompt
+- Works with **Claude Desktop, Claude Code, Cursor**, or any MCP client
+- **No code per endpoint** — the OpenAPI spec is the source of truth
+- **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
+- **Optional semantic search** via Ollama embeddings
+
+## How It Works
+
+```mermaid
+graph TD
+    A[ArgoCD /swagger.json] -->|Fetch at startup| B[Parse Swagger 2.0]
+    B --> C[103+ Endpoints in memory]
+    C --> D[search_operations]
+    C --> E[execute_operation]
+    D -->|LLM discovers endpoints| F[Returns method, path, summary, params]
+    E -->|LLM calls API| G[Proxies to ArgoCD with user token]
+```
+
+1. At startup, the server fetches ArgoCD's Swagger spec
+2. It parses every endpoint (method, path, summary, parameters, request body schema)
+3. **`search_operations`** — keyword or semantic search across all endpoints
+4. **`execute_operation`** — generic HTTP proxy to ArgoCD
+
+---
+
+## Quick Start
+
+### Static Token (simple)
+
+Best for local dev, CI/CD, or single-user setups. Uses a static ArgoCD API token.
+
+#### Claude Code
+
+```bash
+claude mcp add argocd -s user -- \
+  docker run --rm -i \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e ARGOCD_TOKEN=your-token \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+#### Claude Desktop
+
+Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "argocd": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i",
+        "-e", "ARGOCD_BASE_URL=https://argocd.example.com",
+        "-e", "ARGOCD_TOKEN=your-token",
+        "ghcr.io/matthisholleville/argocd-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+---
+
+### OAuth via ArgoCD Dex (per-user RBAC)
+
+Best for multi-user, production setups. Each user authenticates with their own identity via ArgoCD's built-in Dex. **No static token needed** — the user's Dex `id_token` is forwarded to ArgoCD, which applies its RBAC policies per user.
+
+**Step 1: Start the server**
+
+```bash
+docker run -p 8080:8080 \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e MCP_TRANSPORT=http \
+  -e AUTH_MODE=oauth \
+  -e DEX_CLIENT_ID=argo-cd-cli \
+  -e SERVER_BASE_URL=http://localhost:8080 \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+**Step 2: Connect your MCP client**
+
+#### Claude Code
+
+```bash
+claude mcp add --transport http --callback-port 9382 argocd http://localhost:8080/mcp
+```
+
+Then run `/mcp` inside Claude Code to authenticate via the browser.
+
+#### Claude Desktop
+
+Claude Desktop requires a publicly accessible URL (the OAuth redirect goes through `claude.ai`). Expose the server via a reverse proxy or ngrok, then set `SERVER_BASE_URL` accordingly.
+
+Add the public URL as a remote MCP server in **Settings > Connectors** (e.g. `https://mcp.example.com/mcp`). Claude Desktop handles the OAuth flow automatically.
+
+<details>
+<summary><strong>Required: ArgoCD Dex configuration</strong></summary>
+
+<br/>
+
+The `argo-cd-cli` Dex client needs the callback URLs for your MCP clients registered as redirect URIs. Add a `staticClients` override in your ArgoCD `dex.config`:
+
+```yaml
+staticClients:
+  - id: argo-cd-cli
+    name: Argo CD CLI
+    public: true
+    redirectURIs:
+      - http://localhost
+      - http://localhost:8085/auth/callback
+      - http://localhost:9382/callback
+      - https://claude.ai/api/mcp/auth_callback
+```
+
+| Redirect URI | Used by |
+|---|---|
+| `http://localhost` | ArgoCD CLI (`argocd login --sso`) |
+| `http://localhost:8085/auth/callback` | ArgoCD CLI (legacy) |
+| `http://localhost:9382/callback` | Claude Code (`--callback-port 9382`) |
+| `https://claude.ai/api/mcp/auth_callback` | Claude Desktop |
+
+ArgoCD auto-registers `argo-cd-cli` at startup and prepends it to the client list. Dex uses the last definition when there are duplicate IDs, so our override wins safely ([ref](https://github.com/argoproj/argo-cd/blob/master/util/dex/config.go)).
+
+> **Note**: The `argo-cd-cli` client is public (no secret), so this override is safe — unlike overriding `argo-cd` which has an internal secret ([ref](https://github.com/argoproj/argo-cd/issues/19787)).
+
+**How it works under the hood:**
+
+- The MCP server acts as an OAuth proxy to ArgoCD's Dex
+- Uses the `argo-cd-cli` public client (no secret needed)
+- The Dex `id_token` (with `aud: argo-cd-cli`) is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
+- ArgoCD validates the token against Dex's JWKS and applies **per-user RBAC**
+- Each user only sees the applications and resources they have access to
+
+</details>
+
+---
+
+## Semantic Search (optional)
+
+Enable Ollama-powered vector search for better results on natural language queries:
+
+```bash
+docker compose up --build -d  # Starts Ollama + argocd-mcp with embeddings
+```
+
+Set `EMBEDDINGS_ENABLED=true`, `OLLAMA_URL`, and `EMBEDDINGS_MODEL` (defaults to `nomic-embed-text`).
+
+---
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ARGOCD_BASE_URL` | Yes | | ArgoCD server URL |
+| `ARGOCD_TOKEN` | When `AUTH_MODE=token` | | ArgoCD API token |
+| `AUTH_MODE` | No | `token` | `token` (static) or `oauth` (Dex SSO) |
+| `DEX_CLIENT_ID` | When `AUTH_MODE=oauth` | `argo-cd-cli` | Dex client ID |
+| `SERVER_BASE_URL` | When `AUTH_MODE=oauth` | `http://localhost:8080` | Public URL of this server |
+| `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
+| `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
+| `MCP_ADDR` | No | `:8080` | HTTP listen address |
+| `EMBEDDINGS_ENABLED` | No | `false` | Enable Ollama vector search |
+| `OLLAMA_URL` | No | `http://localhost:11434/api` | Ollama API URL |
+| `EMBEDDINGS_MODEL` | No | `nomic-embed-text` | Ollama embedding model |
+
+---
+
+## Build from source
+
+```bash
+make build
+ARGOCD_BASE_URL=https://argocd.example.com ARGOCD_TOKEN=xxx ./bin/argocd-mcp
+```
+
+## License
+
+MIT
