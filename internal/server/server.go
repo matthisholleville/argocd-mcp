@@ -1,0 +1,174 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/matthisholleville/argocd-mcp/internal/auth"
+	"github.com/matthisholleville/argocd-mcp/internal/config"
+	"github.com/matthisholleville/argocd-mcp/internal/gateway"
+	"github.com/matthisholleville/argocd-mcp/internal/openapi"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+const (
+	serverName    = "argocd-mcp"
+	serverVersion = "0.1.0"
+)
+
+// Run is the single entry point.
+func Run(cfg *config.Config) error {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// 1. Fetch and parse ArgoCD OpenAPI spec.
+	endpoints, err := openapi.FetchAndParse(context.Background(), cfg.SpecURL, cfg.ArgoCDToken, logger)
+	if err != nil {
+		return fmt.Errorf("load ArgoCD spec: %w", err)
+	}
+	if len(endpoints) == 0 {
+		return fmt.Errorf("no endpoints found in ArgoCD spec at %s", cfg.SpecURL)
+	}
+
+	// 2. Build the search backend.
+	searcher, err := buildSearcher(cfg, endpoints, logger)
+	if err != nil {
+		return fmt.Errorf("build searcher: %w", err)
+	}
+
+	// 3. Build the gateway.
+	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, logger)
+
+	// 4. Create MCP server.
+	mcpServer := server.NewMCPServer(
+		serverName,
+		serverVersion,
+		server.WithToolCapabilities(true),
+		server.WithRecovery(),
+		server.WithLogging(),
+		server.WithHooks(buildHooks(logger)),
+	)
+
+	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw)
+
+	logger.Info("argocd-mcp ready",
+		slog.String("transport", cfg.Transport),
+		slog.String("auth_mode", cfg.AuthMode),
+		slog.String("argocd", cfg.ArgoCDBaseURL),
+		slog.Int("endpoints", len(endpoints)),
+		slog.Bool("embeddings", cfg.EmbeddingsEnabled),
+	)
+
+	// 5. Start.
+	switch cfg.Transport {
+	case "http":
+		return runHTTP(mcpServer, cfg, logger)
+	default:
+		return runStdio(mcpServer, logger)
+	}
+}
+
+func buildSearcher(cfg *config.Config, endpoints []openapi.Endpoint, logger *slog.Logger) (gateway.Searcher, error) {
+	if !cfg.EmbeddingsEnabled {
+		logger.Info("using keyword search")
+		return openapi.NewKeywordSearcher(endpoints), nil
+	}
+
+	logger.Info("using vector search (Ollama)",
+		slog.String("ollama_url", cfg.OllamaURL),
+		slog.String("model", cfg.EmbeddingsModel),
+	)
+
+	vi, err := openapi.NewVectorIndex(openapi.VectorConfig{
+		OllamaURL: cfg.OllamaURL,
+		Model:     cfg.EmbeddingsModel,
+		TopK:      20,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Info("indexing endpoints into vector store...")
+	if err := vi.Index(context.Background(), endpoints); err != nil {
+		return nil, fmt.Errorf("vector index: %w", err)
+	}
+	logger.Info("vector index ready")
+
+	return vi, nil
+}
+
+func runStdio(s *server.MCPServer, logger *slog.Logger) error {
+	logger.Info("starting stdio transport")
+	return server.ServeStdio(s)
+}
+
+func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error {
+	httpSrv := server.NewStreamableHTTPServer(s,
+		server.WithStateLess(true),
+		server.WithEndpointPath("/mcp"),
+	)
+
+	mux := http.NewServeMux()
+
+	if cfg.AuthMode == "oauth" {
+		mountOAuth(mux, httpSrv, cfg, logger)
+	} else {
+		mux.Handle("/mcp", httpSrv)
+		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	httpServer := &http.Server{Addr: cfg.Addr, Handler: mux}
+
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info("starting HTTP transport", slog.String("addr", cfg.Addr))
+		errCh <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		logger.Info("shutdown signal received")
+		return httpServer.Close()
+	case err := <-errCh:
+		return fmt.Errorf("http server: %w", err)
+	}
+}
+
+func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) {
+	dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
+
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID))
+	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(dexBase+"/auth", cfg.DexClientID))
+	mux.HandleFunc("POST /token", auth.HandleToken(dexBase+"/token", cfg.DexClientID))
+
+	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
+	mux.Handle("/mcp", authMiddleware(httpSrv))
+
+	logger.Info("OAuth mode enabled",
+		slog.String("dex_issuer", dexBase),
+		slog.String("client_id", cfg.DexClientID),
+	)
+}
+
+func buildHooks(logger *slog.Logger) *server.Hooks {
+	hooks := &server.Hooks{}
+	hooks.AddBeforeCallTool(func(ctx context.Context, id any, req *mcp.CallToolRequest) {
+		logger.Info("tool called", slog.String("tool", req.Params.Name), slog.Any("request_id", id))
+	})
+	hooks.AddOnError(func(ctx context.Context, id any, method mcp.MCPMethod, message any, err error) {
+		logger.Error("request error", slog.String("method", string(method)), slog.String("error", err.Error()))
+	})
+	return hooks
+}
