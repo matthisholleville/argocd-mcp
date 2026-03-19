@@ -36,6 +36,16 @@ func Run(cfg *config.Config) error {
 		return fmt.Errorf("no endpoints found in ArgoCD spec at %s", cfg.SpecURL)
 	}
 
+	if cfg.DisableWrite {
+		before := len(endpoints)
+		endpoints = openapi.FilterReadOnly(endpoints)
+		logger.Info("write operations disabled",
+			slog.Int("total", before),
+			slog.Int("read_only", len(endpoints)),
+			slog.Int("filtered_out", before-len(endpoints)),
+		)
+	}
+
 	// 2. Build the search backend.
 	searcher, err := buildSearcher(cfg, endpoints, logger)
 	if err != nil {
@@ -55,7 +65,7 @@ func Run(cfg *config.Config) error {
 		server.WithHooks(buildHooks(logger)),
 	)
 
-	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw)
+	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw, cfg.DisableWrite)
 
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
@@ -63,6 +73,7 @@ func Run(cfg *config.Config) error {
 		slog.String("argocd", cfg.ArgoCDBaseURL),
 		slog.Int("endpoints", len(endpoints)),
 		slog.Bool("embeddings", cfg.EmbeddingsEnabled),
+		slog.Bool("disable_write", cfg.DisableWrite),
 	)
 
 	// 5. Start.

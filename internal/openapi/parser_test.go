@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -66,6 +67,69 @@ func TestParseSpec(t *testing.T) {
 	}
 	if postApp.RequestBody == "" {
 		t.Error("expected request body, got empty")
+	}
+}
+
+func TestFilterReadOnly(t *testing.T) {
+	endpoints := []Endpoint{
+		{Method: "GET", Path: "/api/v1/applications", Summary: "List applications"},
+		{Method: "POST", Path: "/api/v1/applications", Summary: "Create application"},
+		{Method: "PUT", Path: "/api/v1/applications/{name}", Summary: "Update application"},
+		{Method: "PATCH", Path: "/api/v1/applications/{name}", Summary: "Patch application"},
+		{Method: "DELETE", Path: "/api/v1/applications/{name}", Summary: "Delete application"},
+		{Method: "HEAD", Path: "/api/v1/applications", Summary: "Head applications"},
+	}
+
+	filtered := FilterReadOnly(endpoints)
+
+	// Only GET and HEAD should remain.
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 read-only endpoints, got %d", len(filtered))
+	}
+	for _, ep := range filtered {
+		if ep.Method != "GET" && ep.Method != "HEAD" {
+			t.Errorf("unexpected write method in results: %s", ep.Method)
+		}
+	}
+}
+
+func TestFilterReadOnly_EmptyInput(t *testing.T) {
+	filtered := FilterReadOnly(nil)
+	if len(filtered) != 0 {
+		t.Errorf("expected 0 endpoints, got %d", len(filtered))
+	}
+}
+
+func TestFilterReadOnly_AllReadOnly(t *testing.T) {
+	endpoints := []Endpoint{
+		{Method: "GET", Path: "/a", Summary: "A"},
+		{Method: "GET", Path: "/b", Summary: "B"},
+	}
+
+	filtered := FilterReadOnly(endpoints)
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 endpoints, got %d", len(filtered))
+	}
+}
+
+func TestFilterReadOnly_DoesNotMutateOriginal(t *testing.T) {
+	endpoints := []Endpoint{
+		{Method: "GET", Path: "/a", Summary: "A"},
+		{Method: "DELETE", Path: "/b", Summary: "B"},
+	}
+
+	first := endpoints[0]
+	second := endpoints[1]
+	_ = FilterReadOnly(endpoints)
+
+	if len(endpoints) != 2 {
+		t.Errorf("original slice length changed: expected 2, got %d", len(endpoints))
+	}
+	if !reflect.DeepEqual(endpoints[0], first) {
+		t.Error("first element was mutated")
+	}
+	if !reflect.DeepEqual(endpoints[1], second) {
+		t.Error("second element was mutated")
 	}
 }
 

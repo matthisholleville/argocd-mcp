@@ -26,6 +26,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - Works with **Claude Desktop, Claude Code, Cursor**, or any MCP client
 - **No code per endpoint** — the OpenAPI spec is the source of truth
 - **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
+- **Read-only mode** — disable all write operations with a single flag
 - **Optional semantic search** via Ollama embeddings
 
 ## How It Works
@@ -170,6 +171,28 @@ Set `EMBEDDINGS_ENABLED=true`, `OLLAMA_URL`, and `EMBEDDINGS_MODEL` (defaults to
 
 ---
 
+## Read-Only Mode (optional)
+
+Set `DISABLE_WRITE=true` to prevent any disruptive action on your cluster. When enabled:
+
+- **Write endpoints are hidden** — `POST`, `PUT`, `PATCH`, `DELETE` operations are filtered out from the search index, so the LLM never discovers them.
+- **Write execution is blocked** — even if a caller manually crafts an `execute_operation` request with a write method, it is rejected.
+- **Read operations work normally** — `GET`, `HEAD`, `OPTIONS` are unaffected.
+
+This is ideal for production environments, demos, or any setup where you want LLMs to observe but never modify your ArgoCD resources.
+
+```bash
+# Claude Code
+claude mcp add argocd -s user -- \
+  docker run --rm -i \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e ARGOCD_TOKEN=your-token \
+  -e DISABLE_WRITE=true \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+---
+
 ## Configuration
 
 | Variable | Required | Default | Description |
@@ -182,6 +205,7 @@ Set `EMBEDDINGS_ENABLED=true`, `OLLAMA_URL`, and `EMBEDDINGS_MODEL` (defaults to
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
+| `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `EMBEDDINGS_ENABLED` | No | `false` | Enable Ollama vector search |
 | `OLLAMA_URL` | No | `http://localhost:11434/api` | Ollama API URL |
 | `EMBEDDINGS_MODEL` | No | `nomic-embed-text` | Ollama embedding model |

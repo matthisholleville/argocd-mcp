@@ -34,6 +34,9 @@ type Config struct {
 	OllamaURL string
 	// EmbeddingsModel is the Ollama embedding model name.
 	EmbeddingsModel string
+	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
+	// from search results and blocks their execution.
+	DisableWrite bool
 }
 
 // Load reads configuration from environment variables.
@@ -50,6 +53,7 @@ func Load() (*Config, error) {
 		EmbeddingsEnabled: parseBool("EMBEDDINGS_ENABLED", false),
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
+		DisableWrite:      parseBool("DISABLE_WRITE", false),
 	}
 
 	var errs []string

@@ -120,6 +120,26 @@ func resolveRefSummary(ref string, definitions map[string]json.RawMessage) strin
 	return name + "{" + strings.Join(fields, ", ") + "}"
 }
 
+// FilterReadOnly returns a new slice containing only read-only endpoints (GET, HEAD, OPTIONS).
+// Write methods (POST, PUT, PATCH, DELETE) are excluded.
+func FilterReadOnly(endpoints []Endpoint) []Endpoint {
+	filtered := make([]Endpoint, 0, len(endpoints))
+	for _, ep := range endpoints {
+		if isReadOnlyMethod(ep.Method) {
+			filtered = append(filtered, ep)
+		}
+	}
+	return filtered
+}
+
+func isReadOnlyMethod(m string) bool {
+	switch strings.ToUpper(m) {
+	case "GET", "HEAD", "OPTIONS":
+		return true
+	}
+	return false
+}
+
 func isHTTPMethod(m string) bool {
 	switch m {
 	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":

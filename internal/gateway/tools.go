@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -16,9 +17,10 @@ type Searcher interface {
 }
 
 // RegisterMCPTools registers the two meta-tools on the MCP server.
-func RegisterMCPTools(srv *server.MCPServer, endpointCount int, searcher Searcher, gw *Gateway) {
+// When disableWrite is true, write operations (POST, PUT, PATCH, DELETE) are blocked.
+func RegisterMCPTools(srv *server.MCPServer, endpointCount int, searcher Searcher, gw *Gateway, disableWrite bool) {
 	srv.AddTool(searchTool(endpointCount), handleSearch(searcher))
-	srv.AddTool(executeTool(), handleExecute(gw))
+	srv.AddTool(executeTool(disableWrite), handleExecute(gw, disableWrite))
 }
 
 func searchTool(endpointCount int) mcp.Tool {
@@ -36,7 +38,11 @@ func searchTool(endpointCount int) mcp.Tool {
 	)
 }
 
-func executeTool() mcp.Tool {
+func executeTool(disableWrite bool) mcp.Tool {
+	methodDesc := "HTTP method: GET, POST, PUT, PATCH, DELETE"
+	if disableWrite {
+		methodDesc = "HTTP method: GET, HEAD, OPTIONS (write operations are disabled)"
+	}
 	return mcp.NewTool(
 		"execute_operation",
 		mcp.WithDescription(
@@ -45,7 +51,7 @@ func executeTool() mcp.Tool {
 		),
 		mcp.WithString("method",
 			mcp.Required(),
-			mcp.Description("HTTP method: GET, POST, PUT, PATCH, DELETE"),
+			mcp.Description(methodDesc),
 		),
 		mcp.WithString("path",
 			mcp.Required(),
@@ -78,12 +84,28 @@ func handleSearch(searcher Searcher) server.ToolHandlerFunc {
 	}
 }
 
-func handleExecute(gw *Gateway) server.ToolHandlerFunc {
+func isWriteMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	}
+	return false
+}
+
+func handleExecute(gw *Gateway, disableWrite bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
 			return mcp.NewToolResultError("method is required"), nil
 		}
+
+		if disableWrite && isWriteMethod(method) {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"write operations are disabled: %s method is not allowed (DISABLE_WRITE=true)",
+				strings.ToUpper(method),
+			)), nil
+		}
+
 		path, err := req.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError("path is required"), nil
