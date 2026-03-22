@@ -53,25 +53,34 @@ type Config struct {
 
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
+	var errs []string
+
+	embeddingsEnabled, err := parseBool("EMBEDDINGS_ENABLED", false)
+	errs = appendIfErr(errs, err)
+	tlsInsecure, err := parseBool("ARGOCD_TLS_INSECURE", false)
+	errs = appendIfErr(errs, err)
+	disableWrite, err := parseBool("DISABLE_WRITE", false)
+	errs = appendIfErr(errs, err)
+	auditLog, err := parseBool("AUDIT_LOG", true)
+	errs = appendIfErr(errs, err)
+
 	cfg := &Config{
-		Transport:     getEnvOrDefault("MCP_TRANSPORT", "stdio"),
-		Addr:          getEnvOrDefault("MCP_ADDR", ":8080"),
-		ArgoCDBaseURL: os.Getenv("ARGOCD_BASE_URL"),
-		ArgoCDToken:   os.Getenv("ARGOCD_TOKEN"),
-		SpecURL:       os.Getenv("ARGOCD_SPEC_URL"),
+		Transport:         getEnvOrDefault("MCP_TRANSPORT", "stdio"),
+		Addr:              getEnvOrDefault("MCP_ADDR", ":8080"),
+		ArgoCDBaseURL:     os.Getenv("ARGOCD_BASE_URL"),
+		ArgoCDToken:       os.Getenv("ARGOCD_TOKEN"),
+		SpecURL:           os.Getenv("ARGOCD_SPEC_URL"),
 		AuthMode:          getEnvOrDefault("AUTH_MODE", "token"),
 		ServerBaseURL:     os.Getenv("SERVER_BASE_URL"),
 		DexClientID:       getEnvOrDefault("DEX_CLIENT_ID", "argo-cd-cli"),
-		EmbeddingsEnabled: parseBool("EMBEDDINGS_ENABLED", false),
+		EmbeddingsEnabled: embeddingsEnabled,
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
-		TLSInsecure:       parseBool("ARGOCD_TLS_INSECURE", false),
-		DisableWrite:      parseBool("DISABLE_WRITE", false),
+		TLSInsecure:       tlsInsecure,
+		DisableWrite:      disableWrite,
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
-		AuditLog:          parseBool("AUDIT_LOG", true),
+		AuditLog:          auditLog,
 	}
-
-	var errs []string
 
 	if cfg.ArgoCDBaseURL == "" {
 		errs = append(errs, "ARGOCD_BASE_URL is required")
@@ -103,16 +112,23 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-func parseBool(key string, defaultVal bool) bool {
+func appendIfErr(errs []string, err error) []string {
+	if err != nil {
+		return append(errs, err.Error())
+	}
+	return errs
+}
+
+func parseBool(key string, defaultVal bool) (bool, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return defaultVal
+		return defaultVal, nil
 	}
 	b, err := strconv.ParseBool(v)
 	if err != nil {
-		return defaultVal
+		return defaultVal, fmt.Errorf("%s=%q is not a valid boolean (expected true/false/1/0)", key, v)
 	}
-	return b
+	return b, nil
 }
 
 func parseCSV(key string) []string {
