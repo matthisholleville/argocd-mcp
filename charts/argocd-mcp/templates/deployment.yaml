@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "argocd-mcp.fullname" . }}
+  labels:
+    {{- include "argocd-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "argocd-mcp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "argocd-mcp.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "argocd-mcp.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.embeddings.enabled }}
+      initContainers:
+        - name: wait-ollama
+          image: busybox:1.37
+          command: ['sh', '-c', 'until wget -q -O- {{ .Values.embeddings.ollamaURL | default (printf "http://%s-ollama:11434/api" .Release.Name) | trimSuffix "/api" }}/api/tags >/dev/null 2>&1; do echo "waiting for Ollama..."; sleep 3; done']
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: MCP_TRANSPORT
+              value: {{ .Values.mcp.transport | quote }}
+            - name: MCP_ADDR
+              value: {{ .Values.mcp.addr | quote }}
+            - name: ARGOCD_BASE_URL
+              value: {{ required "argocd.baseURL is required" .Values.argocd.baseURL | quote }}
+            {{- if eq .Values.auth.mode "token" }}
+            - name: ARGOCD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "argocd-mcp.secretName" . }}
+                  key: argocd-token
+            {{- end }}
+            - name: AUTH_MODE
+              value: {{ .Values.auth.mode | quote }}
+            {{- if .Values.argocd.specURL }}
+            - name: ARGOCD_SPEC_URL
+              value: {{ .Values.argocd.specURL | quote }}
+            {{- end }}
+            - name: ARGOCD_TLS_INSECURE
+              value: {{ .Values.argocd.tlsInsecure | quote }}
+            {{- if eq .Values.auth.mode "oauth" }}
+            - name: DEX_CLIENT_ID
+              value: {{ .Values.auth.dexClientID | quote }}
+            - name: SERVER_BASE_URL
+              value: {{ required "auth.serverBaseURL is required when auth.mode=oauth" .Values.auth.serverBaseURL | quote }}
+            {{- end }}
+            - name: DISABLE_WRITE
+              value: {{ .Values.security.disableWrite | quote }}
+            {{- if .Values.security.allowedResources }}
+            - name: ALLOWED_RESOURCES
+              value: {{ join "," .Values.security.allowedResources | quote }}
+            {{- end }}
+            - name: AUDIT_LOG
+              value: {{ .Values.audit.enabled | quote }}
+            - name: EMBEDDINGS_ENABLED
+              value: {{ .Values.embeddings.enabled | quote }}
+            {{- if .Values.embeddings.enabled }}
+            - name: OLLAMA_URL
+              value: {{ .Values.embeddings.ollamaURL | default (printf "http://%s-ollama:11434/api" .Release.Name) | quote }}
+            - name: EMBEDDINGS_MODEL
+              value: {{ .Values.embeddings.model | quote }}
+            {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

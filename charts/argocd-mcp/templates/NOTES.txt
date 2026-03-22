@@ -1,0 +1,34 @@
+argocd-mcp has been deployed.
+
+{{- if .Values.ingress.enabled }}
+
+Access the MCP server via your ingress:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+
+{{- else if contains "NodePort" .Values.service.type }}
+
+Get the MCP endpoint:
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "argocd-mcp.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "MCP endpoint: http://$NODE_IP:$NODE_PORT/mcp"
+
+{{- else if contains "ClusterIP" .Values.service.type }}
+
+Forward the service port to your local machine:
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "argocd-mcp.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+Then connect your MCP client to:
+  http://localhost:{{ .Values.service.port }}/mcp
+
+{{- end }}
+
+Configuration:
+  Auth mode:      {{ .Values.auth.mode }}
+  Write disabled: {{ .Values.security.disableWrite }}
+  Audit logging:  {{ .Values.audit.enabled }}
+  Embeddings:     {{ .Values.embeddings.enabled }}
+{{- if .Values.security.allowedResources }}
+  Allowed resources: {{ join ", " .Values.security.allowedResources }}
+{{- end }}

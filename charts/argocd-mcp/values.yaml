@@ -1,0 +1,150 @@
+# -- Number of replicas
+replicaCount: 1
+
+image:
+  # -- Container image repository
+  repository: ghcr.io/matthisholleville/argocd-mcp
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (defaults to chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the release name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+# -- ArgoCD connection settings
+argocd:
+  # -- ArgoCD server URL (required)
+  baseURL: ""
+  # -- ArgoCD API token (required when auth.mode=token)
+  token: ""
+  # -- Use an existing secret for the ArgoCD token instead of creating one.
+  # The secret must contain a key named `argocd-token`.
+  existingSecret: ""
+  # -- Override the default swagger.json URL
+  specURL: ""
+  # -- Skip TLS certificate verification (for self-signed certs)
+  tlsInsecure: false
+
+# -- Authentication settings
+auth:
+  # -- Auth mode: "token" (static) or "oauth" (Dex SSO per-user RBAC)
+  mode: token
+  # -- Dex client ID (only used when mode=oauth)
+  dexClientID: argo-cd-cli
+  # -- Public URL of the MCP server (only used when mode=oauth)
+  serverBaseURL: ""
+
+# -- MCP server settings
+mcp:
+  # -- Transport protocol (always "http" in Kubernetes)
+  transport: http
+  # -- Listen address
+  addr: ":8080"
+
+# -- Security settings
+security:
+  # -- Block all write operations (POST, PUT, PATCH, DELETE)
+  disableWrite: false
+  # -- Restrict to specific ArgoCD resource types (e.g. [ApplicationService, ProjectService])
+  allowedResources: []
+
+# -- Audit logging
+audit:
+  # -- Enable structured JSON audit logs for every tool call
+  enabled: true
+
+# -- Semantic search via Ollama embeddings
+embeddings:
+  # -- Enable vector search (also deploys the Ollama subchart)
+  enabled: false
+  # -- Ollama API URL (auto-configured when using the subchart)
+  ollamaURL: ""
+  # -- Embedding model name
+  model: nomic-embed-text
+
+# -- Ollama subchart configuration (deployed when embeddings.enabled=true)
+# See https://github.com/otwld/ollama-helm for all options
+ollama:
+  ollama:
+    models:
+      pull:
+        - nomic-embed-text
+
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Service port
+  port: 8080
+
+ingress:
+  # -- Enable ingress
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress hosts
+  # @default -- `[]`
+  hosts: []
+  #  - host: argocd-mcp.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  # -- Ingress TLS configuration
+  # @default -- `[]`
+  tls: []
+  #  - secretName: argocd-mcp-tls
+  #    hosts:
+  #      - argocd-mcp.example.com
+
+# -- Pod resource requests and limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+serviceAccount:
+  # -- Create a service account
+  create: true
+  # -- Service account annotations (e.g. for IRSA or Workload Identity)
+  annotations: {}
+  # -- Override the service account name
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}

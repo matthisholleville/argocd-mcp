@@ -53,6 +53,16 @@ graph TD
 
 ## Quick Start
 
+### Helm Chart (Kubernetes)
+
+```bash
+helm install argocd-mcp oci://ghcr.io/matthisholleville/charts/argocd-mcp \
+  --set argocd.baseURL=https://argocd.example.com \
+  --set argocd.token=your-token
+```
+
+See all configuration options in [`charts/argocd-mcp/values.yaml`](charts/argocd-mcp/values.yaml).
+
 ### Static Token (simple)
 
 Best for local dev, CI/CD, or single-user setups. Uses a static ArgoCD API token.

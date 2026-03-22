@@ -93,3 +93,35 @@ jobs:
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: argocd-mcp-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  helm:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Update chart version
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          sed -i "s/^version:.*/version: ${VERSION}/" charts/argocd-mcp/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/argocd-mcp/Chart.yaml
+
+      - name: Build chart dependencies
+        run: helm dependency build charts/argocd-mcp
+
+      - name: Package chart
+        run: helm package charts/argocd-mcp
+
+      - name: Push chart to GHCR
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          helm push argocd-mcp-${VERSION}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
