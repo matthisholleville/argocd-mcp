@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.4.0...v1.5.0) (2026-03-22)
+
+
+### Features
+
+* add per-user rate limiting for execute_operation ([c05bd8b](https://github.com/matthisholleville/argocd-mcp/commit/c05bd8bc797934ce1e9236aeedfe52c4ffb2f3ea))
+
 ## [1.4.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.3.0...v1.4.0) (2026-03-22)
 
 
