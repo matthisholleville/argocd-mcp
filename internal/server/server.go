@@ -35,7 +35,11 @@ func Run(cfg *config.Config) error {
 		logger.Warn("TLS certificate verification is DISABLED (ARGOCD_TLS_INSECURE=true)")
 	}
 
-	endpoints, err := openapi.FetchAndParse(context.Background(), cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
+	const fetchSpecTimeout = 30 * time.Second
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), fetchSpecTimeout)
+	defer fetchCancel()
+
+	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
 	if err != nil {
 		logger.Error("failed to load ArgoCD spec", slog.String("url", cfg.SpecURL), slog.String("error", err.Error()))
 		return fmt.Errorf("load ArgoCD spec: %w", err)

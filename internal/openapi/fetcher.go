@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
@@ -31,8 +30,8 @@ func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool,
 }
 
 func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (json.RawMessage, error) {
+	// Timeout is governed by the ctx deadline passed by the caller.
 	client := &http.Client{
-		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
