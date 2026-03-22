@@ -27,6 +27,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - **No code per endpoint** — the OpenAPI spec is the source of truth
 - **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
+- **Resource scoping** — restrict which ArgoCD resources are exposed with `ALLOWED_RESOURCES`
 - **Audit logging** — structured JSON logs for every tool call (user, method, path, status, duration)
 - **Optional semantic search** via Ollama embeddings
 
@@ -194,6 +195,45 @@ claude mcp add argocd -s user -- \
 
 ---
 
+## Resource Scoping (optional)
+
+Set `ALLOWED_RESOURCES` to restrict which ArgoCD resource types the LLM can discover and call. This filters both search results **and** blocks execution of out-of-scope endpoints.
+
+```bash
+# Only expose application and version endpoints
+ALLOWED_RESOURCES=ApplicationService,VersionService
+```
+
+Composes with `DISABLE_WRITE`:
+
+```bash
+# Read-only access to applications only
+DISABLE_WRITE=true
+ALLOWED_RESOURCES=ApplicationService
+```
+
+Available resource tags (from ArgoCD's OpenAPI spec):
+
+| Tag | Endpoints |
+|-----|-----------|
+| `AccountService` | 6 |
+| `ApplicationService` | 31 |
+| `ApplicationSetService` | 6 |
+| `CertificateService` | 3 |
+| `ClusterService` | 7 |
+| `GPGKeyService` | 4 |
+| `NotificationService` | 3 |
+| `ProjectService` | 12 |
+| `RepoCredsService` | 8 |
+| `RepositoryService` | 17 |
+| `SessionService` | 3 |
+| `SettingsService` | 2 |
+| `VersionService` | 1 |
+
+Matching is case-insensitive (`applicationservice` works).
+
+---
+
 ## Audit Logging
 
 Audit logging is **enabled by default**. Every `search_operations` and `execute_operation` call emits a structured JSON log entry to stderr:
@@ -207,7 +247,7 @@ Each entry includes:
 - **user** — email from the OAuth token (empty in static token mode)
 - **method / path** — the ArgoCD API call (execute) or **query** (search)
 - **status_code** — upstream HTTP response code
-- **blocked** — `true` if the call was rejected by `DISABLE_WRITE`
+- **blocked** — `true` if the call was rejected by `DISABLE_WRITE` or `ALLOWED_RESOURCES`
 - **duration_ms** — round-trip time in milliseconds
 - **error** — error message (logged at ERROR level when present)
 
@@ -228,6 +268,7 @@ Set `AUDIT_LOG=false` to disable.
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
+| `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |
 | `AUDIT_LOG` | No | `true` | Structured JSON audit log for every tool call |
 | `EMBEDDINGS_ENABLED` | No | `false` | Enable Ollama vector search |
 | `OLLAMA_URL` | No | `http://localhost:11434/api` | Ollama API URL |

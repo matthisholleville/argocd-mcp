@@ -45,6 +45,9 @@ services:
       - AUTH_MODE=${AUTH_MODE:-token}
       - SERVER_BASE_URL=${SERVER_BASE_URL:-http://localhost:8086}
       - DEX_CLIENT_ID=${DEX_CLIENT_ID:-argo-cd-cli}
+      - DISABLE_WRITE=${DISABLE_WRITE:-false}
+      - ALLOWED_RESOURCES=${ALLOWED_RESOURCES:-}
+      - AUDIT_LOG=${AUDIT_LOG:-true}
       - EMBEDDINGS_ENABLED=true
       - OLLAMA_URL=http://ollama:11434/api
       - EMBEDDINGS_MODEL=nomic-embed-text

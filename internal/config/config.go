@@ -37,6 +37,11 @@ type Config struct {
 	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
 	// from search results and blocks their execution.
 	DisableWrite bool
+	// AllowedResources restricts which ArgoCD resource types are exposed.
+	// Comma-separated list of OpenAPI tags (e.g. "ApplicationService,VersionService").
+	// When set, only matching endpoints are searchable and executable.
+	// Empty means all resources are allowed.
+	AllowedResources []string
 	// AuditLog enables structured audit logging for every tool call.
 	// Logs are emitted as JSON to stderr alongside other server logs.
 	AuditLog bool
@@ -57,6 +62,7 @@ func Load() (*Config, error) {
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
 		DisableWrite:      parseBool("DISABLE_WRITE", false),
+		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
 		AuditLog:          parseBool("AUDIT_LOG", true),
 	}
 
@@ -102,6 +108,22 @@ func parseBool(key string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return b
+}
+
+func parseCSV(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func getEnvOrDefault(key, defaultVal string) string {

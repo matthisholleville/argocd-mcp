@@ -21,38 +21,58 @@ type Searcher interface {
 
 // RegisterMCPTools registers the two meta-tools on the MCP server.
 // When disableWrite is true, write operations (POST, PUT, PATCH, DELETE) are blocked.
+// When allowed is non-nil, only endpoints in the set can be executed.
 // When auditor is non-nil, every tool call is logged.
-func RegisterMCPTools(srv *server.MCPServer, endpointCount int, searcher Searcher, gw *Gateway, disableWrite bool, auditor *audit.Logger) {
-	srv.AddTool(searchTool(endpointCount), handleSearch(searcher, auditor))
-	srv.AddTool(executeTool(disableWrite), handleExecute(gw, disableWrite, auditor))
+// ToolOptions holds configuration that affects tool descriptions shown to the LLM.
+type ToolOptions struct {
+	EndpointCount    int
+	DisableWrite     bool
+	AllowedResources []string
 }
 
-func searchTool(endpointCount int) mcp.Tool {
+func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher, gw *Gateway, allowed *openapi.AllowedEndpoints, auditor *audit.Logger) {
+	srv.AddTool(searchTool(opts), handleSearch(searcher, auditor))
+	srv.AddTool(executeTool(opts), handleExecute(gw, opts.DisableWrite, allowed, auditor))
+}
+
+func searchTool(opts ToolOptions) mcp.Tool {
+	desc := fmt.Sprintf(
+		"Search the ArgoCD API (%d endpoints). "+
+			"Returns matching endpoints with method, path, summary, and parameters. "+
+			"Use this to discover which API calls are available before executing them.",
+		opts.EndpointCount,
+	)
+	if len(opts.AllowedResources) > 0 {
+		desc += fmt.Sprintf(" Restricted to: %s.", strings.Join(opts.AllowedResources, ", "))
+	}
+	if opts.DisableWrite {
+		desc += " Read-only mode: write operations are disabled."
+	}
+
 	return mcp.NewTool(
 		"search_operations",
-		mcp.WithDescription(fmt.Sprintf(
-			"Search the ArgoCD API (%d endpoints). "+
-				"Returns matching endpoints with method, path, summary, and parameters. "+
-				"Use this to discover which API calls are available before executing them.",
-			endpointCount,
-		)),
+		mcp.WithDescription(desc),
 		mcp.WithString("query",
 			mcp.Description("Search query (e.g. 'sync application', 'get logs', 'list projects')"),
 		),
 	)
 }
 
-func executeTool(disableWrite bool) mcp.Tool {
+func executeTool(opts ToolOptions) mcp.Tool {
 	methodDesc := "HTTP method: GET, POST, PUT, PATCH, DELETE"
-	if disableWrite {
+	if opts.DisableWrite {
 		methodDesc = "HTTP method: GET, HEAD, OPTIONS (write operations are disabled)"
 	}
+
+	desc := "Execute an ArgoCD API operation. " +
+		"Use search_operations first to discover the correct method, path, and parameters."
+	if len(opts.AllowedResources) > 0 {
+		desc += fmt.Sprintf(" Only these resources are allowed: %s.", strings.Join(opts.AllowedResources, ", "))
+	}
+
 	return mcp.NewTool(
 		"execute_operation",
-		mcp.WithDescription(
-			"Execute an ArgoCD API operation. "+
-				"Use search_operations first to discover the correct method, path, and parameters.",
-		),
+		mcp.WithDescription(desc),
 		mcp.WithString("method",
 			mcp.Required(),
 			mcp.Description(methodDesc),
@@ -114,7 +134,7 @@ func isWriteMethod(method string) bool {
 	return false
 }
 
-func handleExecute(gw *Gateway, disableWrite bool, auditor *audit.Logger) server.ToolHandlerFunc {
+func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpoints, auditor *audit.Logger) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
@@ -122,6 +142,9 @@ func handleExecute(gw *Gateway, disableWrite bool, auditor *audit.Logger) server
 		}
 
 		path := req.GetString("path", "")
+		if path == "" {
+			return mcp.NewToolResultError("path is required"), nil
+		}
 
 		if disableWrite && isWriteMethod(method) {
 			if auditor != nil {
@@ -139,9 +162,22 @@ func handleExecute(gw *Gateway, disableWrite bool, auditor *audit.Logger) server
 			)), nil
 		}
 
-		if path == "" {
-			return mcp.NewToolResultError("path is required"), nil
+		if !allowed.IsAllowed(method, path) {
+			if auditor != nil {
+				auditor.LogExecute(ctx, audit.Entry{
+					Tool:    "execute_operation",
+					User:    userFromContext(ctx),
+					Method:  strings.ToUpper(method),
+					Path:    path,
+					Blocked: true,
+				})
+			}
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"operation not allowed: %s %s is outside the permitted resource scope (ALLOWED_RESOURCES)",
+				strings.ToUpper(method), path,
+			)), nil
 		}
+
 		body := req.GetString("body", "")
 
 		queryParams := make(map[string]string)

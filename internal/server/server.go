@@ -47,6 +47,17 @@ func Run(cfg *config.Config) error {
 		)
 	}
 
+	if len(cfg.AllowedResources) > 0 {
+		before := len(endpoints)
+		endpoints = openapi.FilterByTags(endpoints, cfg.AllowedResources)
+		logger.Info("resource scope filtering applied",
+			slog.Any("allowed_resources", cfg.AllowedResources),
+			slog.Int("before", before),
+			slog.Int("after", len(endpoints)),
+			slog.Int("filtered_out", before-len(endpoints)),
+		)
+	}
+
 	// 2. Build the search backend.
 	searcher, err := buildSearcher(cfg, endpoints, logger)
 	if err != nil {
@@ -66,13 +77,24 @@ func Run(cfg *config.Config) error {
 		server.WithHooks(buildHooks(logger)),
 	)
 
+	// Build the allowed endpoints set for execute-time enforcement.
+	// nil means all endpoints are allowed (no ALLOWED_RESOURCES restriction).
+	var allowed *openapi.AllowedEndpoints
+	if len(cfg.AllowedResources) > 0 {
+		allowed = openapi.NewAllowedEndpoints(endpoints)
+	}
+
 	var auditor *audit.Logger
 	if cfg.AuditLog {
 		auditor = audit.New(logger)
 		logger.Info("audit logging enabled")
 	}
 
-	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw, cfg.DisableWrite, auditor)
+	gateway.RegisterMCPTools(mcpServer, gateway.ToolOptions{
+		EndpointCount:    len(endpoints),
+		DisableWrite:     cfg.DisableWrite,
+		AllowedResources: cfg.AllowedResources,
+	}, searcher, gw, allowed, auditor)
 
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
