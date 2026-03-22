@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
@@ -190,13 +192,23 @@ func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("starting HTTP transport", slog.String("addr", cfg.Addr))
-		errCh <- httpServer.ListenAndServe()
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
 	}()
 
 	select {
 	case <-ctx.Done():
-		logger.Info("shutdown signal received")
-		return httpServer.Close()
+		logger.Info("shutdown signal received, draining connections...")
+		// ctx is already cancelled; use a fresh context so the shutdown timeout is not immediately expired.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := httpServer.Shutdown(shutdownCtx)
+		cancel()
+		if err != nil {
+			logger.Error("graceful shutdown failed", slog.String("error", err.Error()))
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		return nil
 	case err := <-errCh:
 		logger.Error("http server failed", slog.String("error", err.Error()))
 		return fmt.Errorf("http server: %w", err)
