@@ -168,6 +168,13 @@ func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error
 
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
 	if cfg.AuthMode == "oauth" {
 		mountOAuth(mux, httpSrv, cfg, logger)
 	} else {
