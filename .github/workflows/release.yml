@@ -114,6 +114,9 @@ jobs:
           sed -i "s/^version:.*/version: ${VERSION}/" charts/argocd-mcp/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/argocd-mcp/Chart.yaml
 
+      - name: Add Helm repositories
+        run: helm repo add ollama-helm https://otwld.github.io/ollama-helm/
+
       - name: Build chart dependencies
         run: helm dependency build charts/argocd-mcp
 
