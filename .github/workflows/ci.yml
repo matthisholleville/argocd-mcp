@@ -60,3 +60,5 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:dev
             ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          build-args: |
+            VERSION=dev-${{ github.sha }}

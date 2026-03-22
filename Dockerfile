@@ -11,11 +11,10 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
-ARG COMMIT=none
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build \
-    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -ldflags "-s -w -X main.version=${VERSION}" \
     -o /bin/argocd-mcp \
     ./cmd/argocd-mcp
 

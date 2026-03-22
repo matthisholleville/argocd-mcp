@@ -21,13 +21,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const (
-	serverName    = "argocd-mcp"
-	serverVersion = "0.1.0"
-)
+const serverName = "argocd-mcp"
 
 // Run is the single entry point.
-func Run(cfg *config.Config) error {
+func Run(cfg *config.Config, version string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// 1. Fetch and parse ArgoCD OpenAPI spec.
@@ -83,7 +80,7 @@ func Run(cfg *config.Config) error {
 	// 4. Create MCP server.
 	mcpServer := server.NewMCPServer(
 		serverName,
-		serverVersion,
+		version,
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
 		server.WithRecovery(),

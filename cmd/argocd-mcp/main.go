@@ -8,6 +8,9 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/server"
 )
 
+// Set via -ldflags at build time.
+var version = "dev"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -15,7 +18,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := server.Run(cfg); err != nil {
+	if err := server.Run(cfg, version); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
 	}

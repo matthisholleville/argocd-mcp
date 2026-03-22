@@ -1,8 +1,7 @@
 BINARY  := argocd-mcp
 CMD     := ./cmd/argocd-mcp
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
-LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)"
+LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: build run test docker-build clean
 
