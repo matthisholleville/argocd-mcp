@@ -31,9 +31,11 @@ func Run(cfg *config.Config) error {
 	// 1. Fetch and parse ArgoCD OpenAPI spec.
 	endpoints, err := openapi.FetchAndParse(context.Background(), cfg.SpecURL, cfg.ArgoCDToken, logger)
 	if err != nil {
+		logger.Error("failed to load ArgoCD spec", slog.String("url", cfg.SpecURL), slog.String("error", err.Error()))
 		return fmt.Errorf("load ArgoCD spec: %w", err)
 	}
 	if len(endpoints) == 0 {
+		logger.Error("no endpoints found in ArgoCD spec", slog.String("url", cfg.SpecURL))
 		return fmt.Errorf("no endpoints found in ArgoCD spec at %s", cfg.SpecURL)
 	}
 
@@ -61,6 +63,7 @@ func Run(cfg *config.Config) error {
 	// 2. Build the search backend.
 	searcher, err := buildSearcher(cfg, endpoints, logger)
 	if err != nil {
+		logger.Error("failed to build searcher", slog.String("error", err.Error()))
 		return fmt.Errorf("build searcher: %w", err)
 	}
 
@@ -139,6 +142,7 @@ func buildSearcher(cfg *config.Config, endpoints []openapi.Endpoint, logger *slo
 
 	logger.Info("indexing endpoints into vector store...")
 	if err := vi.Index(context.Background(), endpoints); err != nil {
+		logger.Error("failed to index endpoints into vector store", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("vector index: %w", err)
 	}
 	logger.Info("vector index ready")
@@ -182,6 +186,7 @@ func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error
 		logger.Info("shutdown signal received")
 		return httpServer.Close()
 	case err := <-errCh:
+		logger.Error("http server failed", slog.String("error", err.Error()))
 		return fmt.Errorf("http server: %w", err)
 	}
 }
