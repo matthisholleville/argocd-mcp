@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -46,6 +47,11 @@ type Config struct {
 	// When set, only matching endpoints are searchable and executable.
 	// Empty means all resources are allowed.
 	AllowedResources []string
+	// RateLimit is the maximum number of execute_operation requests per second
+	// per user. Set to 0 to disable rate limiting.
+	RateLimit float64
+	// RateLimitBurst is the maximum burst size. Defaults to RateLimit if 0.
+	RateLimitBurst int
 	// AuditLog enables structured audit logging for every tool call.
 	// Logs are emitted as JSON to stderr alongside other server logs.
 	AuditLog bool
@@ -63,6 +69,10 @@ func Load() (*Config, error) {
 	errs = appendIfErr(errs, err)
 	auditLog, err := parseBool("AUDIT_LOG", true)
 	errs = appendIfErr(errs, err)
+	rateLimit, err := parseFloat("RATE_LIMIT", 0)
+	errs = appendIfErr(errs, err)
+	rateLimitBurst, err := parseInt("RATE_LIMIT_BURST", 0)
+	errs = appendIfErr(errs, err)
 
 	cfg := &Config{
 		Transport:         getEnvOrDefault("MCP_TRANSPORT", "stdio"),
@@ -79,6 +89,8 @@ func Load() (*Config, error) {
 		TLSInsecure:       tlsInsecure,
 		DisableWrite:      disableWrite,
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
+		RateLimit:         rateLimit,
+		RateLimitBurst:    rateLimitBurst,
 		AuditLog:          auditLog,
 	}
 
@@ -97,6 +109,12 @@ func Load() (*Config, error) {
 	if cfg.AuthMode == "oauth" && cfg.Transport != "http" {
 		errs = append(errs, "AUTH_MODE=oauth requires MCP_TRANSPORT=http")
 	}
+	if cfg.RateLimit < 0 {
+		errs = append(errs, "RATE_LIMIT must be >= 0")
+	}
+	if cfg.RateLimitBurst < 0 {
+		errs = append(errs, "RATE_LIMIT_BURST must be >= 0")
+	}
 
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("configuration errors:\n  - %s", strings.Join(errs, "\n  - "))
@@ -108,6 +126,9 @@ func Load() (*Config, error) {
 	if cfg.ServerBaseURL == "" {
 		cfg.ServerBaseURL = "http://localhost" + cfg.Addr
 	}
+	if cfg.RateLimitBurst == 0 && cfg.RateLimit > 0 {
+		cfg.RateLimitBurst = int(math.Ceil(cfg.RateLimit))
+	}
 
 	return cfg, nil
 }
@@ -117,6 +138,30 @@ func appendIfErr(errs []string, err error) []string {
 		return append(errs, err.Error())
 	}
 	return errs
+}
+
+func parseFloat(key string, defaultVal float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return defaultVal, fmt.Errorf("%s=%q is not a valid number", key, v)
+	}
+	return f, nil
+}
+
+func parseInt(key string, defaultVal int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal, nil
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultVal, fmt.Errorf("%s=%q is not a valid integer", key, v)
+	}
+	return i, nil
 }
 
 func parseBool(key string, defaultVal bool) (bool, error) {

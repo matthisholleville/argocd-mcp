@@ -54,6 +54,13 @@ security:
   # -- Restrict to specific ArgoCD resource types (e.g. [ApplicationService, ProjectService])
   allowedResources: []
 
+# -- Rate limiting (execute_operation only)
+rateLimit:
+  # -- Max requests per second per user (0 = disabled)
+  requestsPerSecond: 0
+  # -- Max burst size (defaults to requestsPerSecond if 0)
+  burst: 0
+
 # -- Audit logging
 audit:
   # -- Enable structured JSON audit logs for every tool call

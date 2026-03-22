@@ -48,6 +48,8 @@ services:
       - ARGOCD_TLS_INSECURE=${ARGOCD_TLS_INSECURE:-true}
       - DISABLE_WRITE=${DISABLE_WRITE:-false}
       - ALLOWED_RESOURCES=${ALLOWED_RESOURCES:-}
+      - RATE_LIMIT=${RATE_LIMIT:-0}
+      - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-0}
       - AUDIT_LOG=${AUDIT_LOG:-true}
       - EMBEDDINGS_ENABLED=true
       - OLLAMA_URL=http://ollama:11434/api

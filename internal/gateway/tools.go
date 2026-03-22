@@ -10,6 +10,7 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
+	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -30,9 +31,9 @@ type ToolOptions struct {
 	AllowedResources []string
 }
 
-func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher, gw *Gateway, allowed *openapi.AllowedEndpoints, auditor *audit.Logger) {
+func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher, gw *Gateway, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger) {
 	srv.AddTool(searchTool(opts), handleSearch(searcher, auditor))
-	srv.AddTool(executeTool(opts), handleExecute(gw, opts.DisableWrite, allowed, auditor))
+	srv.AddTool(executeTool(opts), handleExecute(gw, opts.DisableWrite, allowed, limiter, auditor))
 }
 
 func searchTool(opts ToolOptions) mcp.Tool {
@@ -134,7 +135,7 @@ func isWriteMethod(method string) bool {
 	return false
 }
 
-func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpoints, auditor *audit.Logger) server.ToolHandlerFunc {
+func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
@@ -146,11 +147,13 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 			return mcp.NewToolResultError("path is required"), nil
 		}
 
+		user := userFromContext(ctx)
+
 		if disableWrite && isWriteMethod(method) {
 			if auditor != nil {
 				auditor.LogExecute(ctx, audit.Entry{
 					Tool:    "execute_operation",
-					User:    userFromContext(ctx),
+					User:    user,
 					Method:  strings.ToUpper(method),
 					Path:    path,
 					Blocked: true,
@@ -166,7 +169,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 			if auditor != nil {
 				auditor.LogExecute(ctx, audit.Entry{
 					Tool:    "execute_operation",
-					User:    userFromContext(ctx),
+					User:    user,
 					Method:  strings.ToUpper(method),
 					Path:    path,
 					Blocked: true,
@@ -176,6 +179,18 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 				"operation not allowed: %s %s is outside the permitted resource scope (ALLOWED_RESOURCES)",
 				strings.ToUpper(method), path,
 			)), nil
+		}
+		if !limiter.Allow(user) {
+			if auditor != nil {
+				auditor.LogExecute(ctx, audit.Entry{
+					Tool:    "execute_operation",
+					User:    user,
+					Method:  strings.ToUpper(method),
+					Path:    path,
+					Blocked: true,
+				})
+			}
+			return mcp.NewToolResultError("rate limit exceeded: too many requests, please slow down"), nil
 		}
 
 		body := req.GetString("body", "")
@@ -199,7 +214,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 		if auditor != nil {
 			entry := audit.Entry{
 				Tool:     "execute_operation",
-				User:     userFromContext(ctx),
+				User:     user,
 				Method:   strings.ToUpper(method),
 				Path:     path,
 				Duration: duration,

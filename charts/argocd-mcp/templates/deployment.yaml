@@ -89,6 +89,14 @@ spec:
             - name: ALLOWED_RESOURCES
               value: {{ join "," .Values.security.allowedResources | quote }}
             {{- end }}
+            {{- if .Values.rateLimit.requestsPerSecond }}
+            - name: RATE_LIMIT
+              value: {{ .Values.rateLimit.requestsPerSecond | quote }}
+            {{- if .Values.rateLimit.burst }}
+            - name: RATE_LIMIT_BURST
+              value: {{ .Values.rateLimit.burst | quote }}
+            {{- end }}
+            {{- end }}
             - name: AUDIT_LOG
               value: {{ .Values.audit.enabled | quote }}
             - name: EMBEDDINGS_ENABLED

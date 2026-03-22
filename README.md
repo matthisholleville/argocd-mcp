@@ -245,6 +245,40 @@ Matching is case-insensitive (`applicationservice` works).
 
 ---
 
+## Rate Limiting (optional)
+
+Protect ArgoCD from excessive API calls by setting `RATE_LIMIT`. Only `execute_operation` is rate limited — search is local and not affected.
+
+```bash
+RATE_LIMIT=10              # 10 requests/sec per user
+RATE_LIMIT_BURST=20        # allow short bursts up to 20
+```
+
+<details>
+<summary><strong>How rate limiting works</strong></summary>
+
+<br/>
+
+Rate limiting uses a **token bucket per user**. Each user gets a bucket that refills at `RATE_LIMIT` tokens per second, with a maximum of `RATE_LIMIT_BURST` tokens. When the bucket is empty, requests are rejected until tokens refill.
+
+| Auth mode | Bucket key | Behavior |
+|-----------|-----------|----------|
+| **OAuth** | User email from JWT | Each user has an independent limit |
+| **Static token** | Shared `"static-token"` key | All clients share one bucket |
+
+> **Note**: In static token mode, an aggressive LLM can starve other clients. Prefer OAuth mode in multi-user production setups.
+
+When a request is rate limited:
+- The call **never reaches ArgoCD** — rejected before the proxy
+- An audit log entry is emitted with `blocked: true`
+- The LLM receives a clear error: `"rate limit exceeded: too many requests, please slow down"`
+
+If `RATE_LIMIT_BURST` is not set, it defaults to the `RATE_LIMIT` value. Set `RATE_LIMIT=0` (or omit it) to disable rate limiting entirely.
+
+</details>
+
+---
+
 ## Prompt Templates
 
 Pre-packaged workflows for common ArgoCD operations. MCP clients (Claude Desktop, Cursor) show these as selectable prompts in their UI.
@@ -297,6 +331,8 @@ Set `AUDIT_LOG=false` to disable.
 | `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs) |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |
+| `RATE_LIMIT` | No | `0` (disabled) | Max `execute_operation` requests per second per user |
+| `RATE_LIMIT_BURST` | No | same as `RATE_LIMIT` | Max burst size before throttling |
 | `AUDIT_LOG` | No | `true` | Structured JSON audit log for every tool call |
 | `EMBEDDINGS_ENABLED` | No | `false` | Enable Ollama vector search |
 | `OLLAMA_URL` | No | `http://localhost:11434/api` | Ollama API URL |

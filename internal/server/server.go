@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
+	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
@@ -27,13 +28,17 @@ const serverName = "argocd-mcp"
 func Run(cfg *config.Config, version string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	// Server-wide context tied to SIGTERM/SIGINT for graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// 1. Fetch and parse ArgoCD OpenAPI spec.
 	if cfg.TLSInsecure {
 		logger.Warn("TLS certificate verification is DISABLED (ARGOCD_TLS_INSECURE=true)")
 	}
 
 	const fetchSpecTimeout = 30 * time.Second
-	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), fetchSpecTimeout)
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, fetchSpecTimeout)
 	defer fetchCancel()
 
 	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
@@ -95,6 +100,14 @@ func Run(cfg *config.Config, version string) error {
 		allowed = openapi.NewAllowedEndpoints(endpoints)
 	}
 
+	limiter := ratelimit.New(ctx, cfg.RateLimit, cfg.RateLimitBurst)
+	if cfg.RateLimit > 0 {
+		logger.Info("rate limiting enabled",
+			slog.Float64("rate_per_sec", cfg.RateLimit),
+			slog.Int("burst", cfg.RateLimitBurst),
+		)
+	}
+
 	var auditor *audit.Logger
 	if cfg.AuditLog {
 		auditor = audit.New(logger)
@@ -107,7 +120,7 @@ func Run(cfg *config.Config, version string) error {
 		EndpointCount:    len(endpoints),
 		DisableWrite:     cfg.DisableWrite,
 		AllowedResources: cfg.AllowedResources,
-	}, searcher, gw, allowed, auditor)
+	}, searcher, gw, allowed, limiter, auditor)
 
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
@@ -122,7 +135,7 @@ func Run(cfg *config.Config, version string) error {
 	// 5. Start.
 	switch cfg.Transport {
 	case "http":
-		return runHTTP(mcpServer, cfg, logger)
+		return runHTTP(ctx, mcpServer, cfg, logger)
 	default:
 		return runStdio(mcpServer, logger)
 	}
@@ -163,7 +176,7 @@ func runStdio(s *server.MCPServer, logger *slog.Logger) error {
 	return server.ServeStdio(s)
 }
 
-func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error {
+func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error {
 	httpSrv := server.NewStreamableHTTPServer(s,
 		server.WithStateLess(true),
 		server.WithEndpointPath("/mcp"),
@@ -184,9 +197,6 @@ func runHTTP(s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	httpServer := &http.Server{Addr: cfg.Addr, Handler: mux}
 
