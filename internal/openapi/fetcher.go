@@ -12,10 +12,10 @@ import (
 )
 
 // FetchAndParse fetches the ArgoCD Swagger spec and returns the parsed endpoints.
-func FetchAndParse(ctx context.Context, specURL, token string, logger *slog.Logger) ([]Endpoint, error) {
+func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool, logger *slog.Logger) ([]Endpoint, error) {
 	logger.Info("fetching ArgoCD OpenAPI spec", slog.String("url", specURL))
 
-	raw, err := fetchSpec(ctx, specURL, token)
+	raw, err := fetchSpec(ctx, specURL, token, tlsInsecure)
 	if err != nil {
 		return nil, fmt.Errorf("fetch spec: %w", err)
 	}
@@ -29,12 +29,12 @@ func FetchAndParse(ctx context.Context, specURL, token string, logger *slog.Logg
 	return endpoints, nil
 }
 
-func fetchSpec(ctx context.Context, specURL, token string) (json.RawMessage, error) {
+func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (json.RawMessage, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // ArgoCD often uses self-signed certs
+				InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
 			},
 		},
 	}

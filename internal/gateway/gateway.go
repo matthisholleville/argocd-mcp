@@ -24,7 +24,8 @@ type Gateway struct {
 }
 
 // NewGateway creates a Gateway targeting the given ArgoCD instance.
-func NewGateway(baseURL, staticToken string, logger *slog.Logger) *Gateway {
+// When tlsInsecure is true, TLS certificate verification is skipped.
+func NewGateway(baseURL, staticToken string, tlsInsecure bool, logger *slog.Logger) *Gateway {
 	return &Gateway{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   staticToken,
@@ -33,7 +34,7 @@ func NewGateway(baseURL, staticToken string, logger *slog.Logger) *Gateway {
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // ArgoCD often uses self-signed certs
+					InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
 				},
 			},
 		},

@@ -29,7 +29,11 @@ func Run(cfg *config.Config) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// 1. Fetch and parse ArgoCD OpenAPI spec.
-	endpoints, err := openapi.FetchAndParse(context.Background(), cfg.SpecURL, cfg.ArgoCDToken, logger)
+	if cfg.TLSInsecure {
+		logger.Warn("TLS certificate verification is DISABLED (ARGOCD_TLS_INSECURE=true)")
+	}
+
+	endpoints, err := openapi.FetchAndParse(context.Background(), cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
 	if err != nil {
 		logger.Error("failed to load ArgoCD spec", slog.String("url", cfg.SpecURL), slog.String("error", err.Error()))
 		return fmt.Errorf("load ArgoCD spec: %w", err)
@@ -68,7 +72,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	// 3. Build the gateway.
-	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, logger)
+	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
 
 	// 4. Create MCP server.
 	mcpServer := server.NewMCPServer(
@@ -109,6 +113,7 @@ func Run(cfg *config.Config) error {
 		slog.Int("endpoints", len(endpoints)),
 		slog.Bool("embeddings", cfg.EmbeddingsEnabled),
 		slog.Bool("disable_write", cfg.DisableWrite),
+		slog.Bool("tls_insecure", cfg.TLSInsecure),
 	)
 
 	// 5. Start.

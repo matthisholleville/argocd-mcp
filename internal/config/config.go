@@ -34,6 +34,10 @@ type Config struct {
 	OllamaURL string
 	// EmbeddingsModel is the Ollama embedding model name.
 	EmbeddingsModel string
+	// TLSInsecure disables TLS certificate verification when connecting to ArgoCD.
+	// Defaults to false (secure). Set to true only when ArgoCD uses self-signed
+	// certificates that cannot be added to the trust store.
+	TLSInsecure bool
 	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
 	// from search results and blocks their execution.
 	DisableWrite bool
@@ -61,6 +65,7 @@ func Load() (*Config, error) {
 		EmbeddingsEnabled: parseBool("EMBEDDINGS_ENABLED", false),
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
+		TLSInsecure:       parseBool("ARGOCD_TLS_INSECURE", false),
 		DisableWrite:      parseBool("DISABLE_WRITE", false),
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
 		AuditLog:          parseBool("AUDIT_LOG", true),

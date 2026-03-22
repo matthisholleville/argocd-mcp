@@ -284,6 +284,7 @@ Set `AUDIT_LOG=false` to disable.
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
+| `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs) |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |
 | `AUDIT_LOG` | No | `true` | Structured JSON audit log for every tool call |
