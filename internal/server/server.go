@@ -72,6 +72,7 @@ func Run(cfg *config.Config) error {
 		serverName,
 		serverVersion,
 		server.WithToolCapabilities(true),
+		server.WithPromptCapabilities(true),
 		server.WithRecovery(),
 		server.WithLogging(),
 		server.WithHooks(buildHooks(logger)),
@@ -89,6 +90,8 @@ func Run(cfg *config.Config) error {
 		auditor = audit.New(logger)
 		logger.Info("audit logging enabled")
 	}
+
+	gateway.RegisterMCPPrompts(mcpServer)
 
 	gateway.RegisterMCPTools(mcpServer, gateway.ToolOptions{
 		EndpointCount:    len(endpoints),

@@ -28,6 +28,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
 - **Resource scoping** — restrict which ArgoCD resources are exposed with `ALLOWED_RESOURCES`
+- **Prompt templates** — pre-packaged workflows for common operations (unhealthy apps, diff, rollback, logs)
 - **Audit logging** — structured JSON logs for every tool call (user, method, path, status, duration)
 - **Optional semantic search** via Ollama embeddings
 
@@ -231,6 +232,22 @@ Available resource tags (from ArgoCD's OpenAPI spec):
 | `VersionService` | 1 |
 
 Matching is case-insensitive (`applicationservice` works).
+
+---
+
+## Prompt Templates
+
+Pre-packaged workflows for common ArgoCD operations. MCP clients (Claude Desktop, Cursor) show these as selectable prompts in their UI.
+
+| Prompt | Description | Arguments |
+|--------|-------------|-----------|
+| `unhealthy-apps` | Find all apps with degraded health or out-of-sync status | — |
+| `sync-status` | Dashboard-style overview of all apps | — |
+| `app-diff` | Show what would change on sync | `appName` (required) |
+| `rollback` | Show history and rollback to a previous revision | `appName` (required) |
+| `app-logs` | Fetch and analyze container logs | `appName` (required), `container` (optional) |
+
+Each prompt guides the LLM through a step-by-step workflow using `search_operations` and `execute_operation`. No additional tools are needed.
 
 ---
 
