@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.1.0...v1.2.0) (2026-03-22)
+
+
+### Features
+
+* add ALLOWED_RESOURCES to restrict exposed endpoints by resource type ([56d30e2](https://github.com/matthisholleville/argocd-mcp/commit/56d30e235c18f2e0cf06974dc48bd6bf951f725f))
+* add structured audit logging for every tool call ([dd60ef9](https://github.com/matthisholleville/argocd-mcp/commit/dd60ef95a73cf95d4e29525d534969e6a09e20de))
+
 ## [1.1.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.0.0...v1.1.0) (2026-03-19)
 
 
