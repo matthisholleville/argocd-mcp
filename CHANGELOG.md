@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.3.0...v1.4.0) (2026-03-22)
+
+
+### Features
+
+* add production-grade Helm chart with OCI registry publishing ([145e893](https://github.com/matthisholleville/argocd-mcp/commit/145e893902a134c9cc7e5686c83ba26e9500550a))
+
+
+### Bug Fixes
+
+* add helm repo add before dependency build in CI workflows ([c7a73d5](https://github.com/matthisholleville/argocd-mcp/commit/c7a73d5cf763ad96882c43e88d37f6d75a077f52))
+* handle NDJSON and non-JSON responses from ArgoCD ([67b8d1c](https://github.com/matthisholleville/argocd-mcp/commit/67b8d1c47625a9d77d93fcad0daaf4e41ff7ae51))
+
+
+### Miscellaneous
+
+* let release-please manage Chart.yaml version via extra-files ([9f74176](https://github.com/matthisholleville/argocd-mcp/commit/9f74176fbe45e3e44a5dea45a7a7d9a375ea85f3))
+
 ## [1.3.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.2.0...v1.3.0) (2026-03-22)
 
 
