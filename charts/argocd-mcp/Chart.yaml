@@ -2,8 +2,8 @@ apiVersion: v2
 name: argocd-mcp
 description: OpenAPI-driven MCP server that exposes the entire ArgoCD API to LLMs
 type: application
-version: 0.1.0
-appVersion: "1.3.0"
+version: 1.4.0
+appVersion: 1.4.0
 home: https://github.com/matthisholleville/argocd-mcp
 sources:
   - https://github.com/matthisholleville/argocd-mcp
@@ -18,6 +18,6 @@ keywords:
   - gitops
 dependencies:
   - name: ollama
-    version: "1.52.0"
+    version: 1.52.0
     repository: https://otwld.github.io/ollama-helm/
     condition: embeddings.enabled
