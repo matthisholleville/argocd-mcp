@@ -109,10 +109,27 @@ func (g *Gateway) Execute(ctx context.Context, params ExecuteParams) (json.RawMe
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
+	// Determine how to represent the response body in the JSON result.
+	// Content-Type is deliberately ignored in favour of byte-level validation
+	// because ArgoCD may return NDJSON with Content-Type: application/json.
+	var body json.RawMessage
+	switch {
+	case len(respBody) == 0:
+		body = json.RawMessage("null")
+	case json.Valid(respBody):
+		body = respBody
+	default:
+		wrapped, err := json.Marshal(string(respBody))
+		if err != nil {
+			return nil, fmt.Errorf("marshal non-json body: %w", err)
+		}
+		body = wrapped
+	}
+
 	result := ExecuteResult{
 		Status:     resp.StatusCode,
 		StatusText: resp.Status,
-		Body:       json.RawMessage(respBody),
+		Body:       body,
 	}
 
 	out, err := json.Marshal(result)
