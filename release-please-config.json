@@ -4,6 +4,20 @@
       "release-type": "go",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "yaml",
+          "path": "charts/argocd-mcp/Chart.yaml",
+          "glob": false,
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "yaml",
+          "path": "charts/argocd-mcp/Chart.yaml",
+          "glob": false,
+          "jsonpath": "$.appVersion"
+        }
+      ],
       "changelog-sections": [
         {"type": "feat", "section": "Features"},
         {"type": "fix", "section": "Bug Fixes"},

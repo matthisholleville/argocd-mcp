@@ -107,13 +107,6 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
 
-      - name: Update chart version
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#v}"
-          sed -i "s/^version:.*/version: ${VERSION}/" charts/argocd-mcp/Chart.yaml
-          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/argocd-mcp/Chart.yaml
-
       - name: Add Helm repositories
         run: helm repo add ollama-helm https://otwld.github.io/ollama-helm/
 
@@ -124,7 +117,4 @@ jobs:
         run: helm package charts/argocd-mcp
 
       - name: Push chart to GHCR
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#v}"
-          helm push argocd-mcp-${VERSION}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: helm push argocd-mcp-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
