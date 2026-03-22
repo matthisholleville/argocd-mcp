@@ -2,6 +2,9 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -18,10 +21,13 @@ type registerRequest struct {
 // HandleRegister serves POST /register.
 // Returns the configured Dex client_id and echoes back the client's
 // redirect_uris so the MCP client knows its registration was accepted.
-func HandleRegister(clientID string) http.HandlerFunc {
+func HandleRegister(clientID string, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req registerRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil &&
+			!errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			logger.Debug("register: could not decode request body", slog.String("error", err.Error()))
+		}
 
 		resp := map[string]any{
 			"client_id":                  clientID,

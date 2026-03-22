@@ -222,7 +222,7 @@ func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, lo
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
-	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID))
+	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID, logger))
 	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(dexBase+"/auth", cfg.DexClientID))
 	mux.HandleFunc("POST /token", auth.HandleToken(dexBase+"/token", cfg.DexClientID))
 

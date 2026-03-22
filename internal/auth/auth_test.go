@@ -66,7 +66,7 @@ func TestHandleAuthorize_InvalidDexURL(t *testing.T) {
 
 // Empty body must not crash — MCP clients may send minimal requests.
 func TestHandleRegister_EmptyBody(t *testing.T) {
-	handler := HandleRegister("argo-cd-cli")
+	handler := HandleRegister("argo-cd-cli", silentLogger())
 	req := httptest.NewRequest(http.MethodPost, "/register", nil)
 	rec := httptest.NewRecorder()
 
@@ -89,7 +89,7 @@ func TestHandleRegister_EmptyBody(t *testing.T) {
 
 // Malformed JSON body must not crash — returns client_id with zeroed optional fields.
 func TestHandleRegister_MalformedBody(t *testing.T) {
-	handler := HandleRegister("argo-cd-cli")
+	handler := HandleRegister("argo-cd-cli", silentLogger())
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"redirect_uris": "not-an-array"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
