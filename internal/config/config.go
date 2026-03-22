@@ -37,6 +37,9 @@ type Config struct {
 	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
 	// from search results and blocks their execution.
 	DisableWrite bool
+	// AuditLog enables structured audit logging for every tool call.
+	// Logs are emitted as JSON to stderr alongside other server logs.
+	AuditLog bool
 }
 
 // Load reads configuration from environment variables.
@@ -54,6 +57,7 @@ func Load() (*Config, error) {
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
 		DisableWrite:      parseBool("DISABLE_WRITE", false),
+		AuditLog:          parseBool("AUDIT_LOG", true),
 	}
 
 	var errs []string

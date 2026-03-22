@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/matthisholleville/argocd-mcp/internal/audit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
@@ -65,7 +66,13 @@ func Run(cfg *config.Config) error {
 		server.WithHooks(buildHooks(logger)),
 	)
 
-	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw, cfg.DisableWrite)
+	var auditor *audit.Logger
+	if cfg.AuditLog {
+		auditor = audit.New(logger)
+		logger.Info("audit logging enabled")
+	}
+
+	gateway.RegisterMCPTools(mcpServer, len(endpoints), searcher, gw, cfg.DisableWrite, auditor)
 
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),

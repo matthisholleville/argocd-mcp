@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/matthisholleville/argocd-mcp/internal/audit"
+	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -18,9 +21,10 @@ type Searcher interface {
 
 // RegisterMCPTools registers the two meta-tools on the MCP server.
 // When disableWrite is true, write operations (POST, PUT, PATCH, DELETE) are blocked.
-func RegisterMCPTools(srv *server.MCPServer, endpointCount int, searcher Searcher, gw *Gateway, disableWrite bool) {
-	srv.AddTool(searchTool(endpointCount), handleSearch(searcher))
-	srv.AddTool(executeTool(disableWrite), handleExecute(gw, disableWrite))
+// When auditor is non-nil, every tool call is logged.
+func RegisterMCPTools(srv *server.MCPServer, endpointCount int, searcher Searcher, gw *Gateway, disableWrite bool, auditor *audit.Logger) {
+	srv.AddTool(searchTool(endpointCount), handleSearch(searcher, auditor))
+	srv.AddTool(executeTool(disableWrite), handleExecute(gw, disableWrite, auditor))
 }
 
 func searchTool(endpointCount int) mcp.Tool {
@@ -66,11 +70,29 @@ func executeTool(disableWrite bool) mcp.Tool {
 	)
 }
 
-func handleSearch(searcher Searcher) server.ToolHandlerFunc {
+func handleSearch(searcher Searcher, auditor *audit.Logger) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := req.GetString("query", "")
+		start := time.Now()
 
 		results, err := searcher.Search(ctx, query, 20)
+		duration := time.Since(start)
+
+		if auditor != nil {
+			entry := audit.Entry{
+				Tool:     "search_operations",
+				Query:    query,
+				Duration: duration,
+				User:     userFromContext(ctx),
+			}
+			if err != nil {
+				entry.Error = fmt.Sprintf("search failed: %v", err)
+			} else {
+				entry.ResultCount = len(results)
+			}
+			auditor.LogSearch(ctx, entry)
+		}
+
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("search failed: %v", err)), nil
 		}
@@ -92,22 +114,32 @@ func isWriteMethod(method string) bool {
 	return false
 }
 
-func handleExecute(gw *Gateway, disableWrite bool) server.ToolHandlerFunc {
+func handleExecute(gw *Gateway, disableWrite bool, auditor *audit.Logger) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
 			return mcp.NewToolResultError("method is required"), nil
 		}
 
+		path := req.GetString("path", "")
+
 		if disableWrite && isWriteMethod(method) {
+			if auditor != nil {
+				auditor.LogExecute(ctx, audit.Entry{
+					Tool:    "execute_operation",
+					User:    userFromContext(ctx),
+					Method:  strings.ToUpper(method),
+					Path:    path,
+					Blocked: true,
+				})
+			}
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"write operations are disabled: %s method is not allowed (DISABLE_WRITE=true)",
 				strings.ToUpper(method),
 			)), nil
 		}
 
-		path, err := req.RequireString("path")
-		if err != nil {
+		if path == "" {
 			return mcp.NewToolResultError("path is required"), nil
 		}
 		body := req.GetString("body", "")
@@ -119,16 +151,62 @@ func handleExecute(gw *Gateway, disableWrite bool) server.ToolHandlerFunc {
 			}
 		}
 
+		start := time.Now()
 		result, err := gw.Execute(ctx, ExecuteParams{
 			Method:      method,
 			Path:        path,
 			QueryParams: queryParams,
 			Body:        body,
 		})
+		duration := time.Since(start)
+
+		if auditor != nil {
+			entry := audit.Entry{
+				Tool:     "execute_operation",
+				User:     userFromContext(ctx),
+				Method:   strings.ToUpper(method),
+				Path:     path,
+				Duration: duration,
+			}
+			if err != nil {
+				entry.Error = fmt.Sprintf("execute: %v", err)
+			} else {
+				entry.StatusCode = extractStatusCode(result)
+			}
+			auditor.LogExecute(ctx, entry)
+		}
+
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("execute: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(result)), nil
 	}
+}
+
+// userFromContext extracts the user identity from the context.
+// In OAuth mode, returns the email from the JWT claims.
+// In token mode (no bearer token in context), returns "static-token".
+func userFromContext(ctx context.Context) string {
+	token, ok := auth.GetBearerToken(ctx)
+	if !ok {
+		return "static-token"
+	}
+	claims := auth.ParseTokenClaims(token)
+	if claims == nil || claims.Email == "" {
+		return "static-token"
+	}
+	return claims.Email
+}
+
+// extractStatusCode reads the status field from the gateway JSON response.
+// Returns nil when the status cannot be determined.
+func extractStatusCode(raw json.RawMessage) *int {
+	var resp struct {
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil || resp.Status == 0 {
+		return nil
+	}
+	return &resp.Status
 }

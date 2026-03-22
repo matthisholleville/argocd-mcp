@@ -27,6 +27,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - **No code per endpoint** — the OpenAPI spec is the source of truth
 - **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
+- **Audit logging** — structured JSON logs for every tool call (user, method, path, status, duration)
 - **Optional semantic search** via Ollama embeddings
 
 ## How It Works
@@ -193,6 +194,27 @@ claude mcp add argocd -s user -- \
 
 ---
 
+## Audit Logging
+
+Audit logging is **enabled by default**. Every `search_operations` and `execute_operation` call emits a structured JSON log entry to stderr:
+
+```json
+{"time":"2026-03-22T10:00:00Z","level":"INFO","msg":"audit","tool":"execute_operation","method":"GET","path":"/api/v1/applications","blocked":false,"duration_ms":142,"status_code":200,"user":"alice@example.com"}
+```
+
+Each entry includes:
+- **tool** — `search_operations` or `execute_operation`
+- **user** — email from the OAuth token (empty in static token mode)
+- **method / path** — the ArgoCD API call (execute) or **query** (search)
+- **status_code** — upstream HTTP response code
+- **blocked** — `true` if the call was rejected by `DISABLE_WRITE`
+- **duration_ms** — round-trip time in milliseconds
+- **error** — error message (logged at ERROR level when present)
+
+Set `AUDIT_LOG=false` to disable.
+
+---
+
 ## Configuration
 
 | Variable | Required | Default | Description |
@@ -206,6 +228,7 @@ claude mcp add argocd -s user -- \
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
+| `AUDIT_LOG` | No | `true` | Structured JSON audit log for every tool call |
 | `EMBEDDINGS_ENABLED` | No | `false` | Enable Ollama vector search |
 | `OLLAMA_URL` | No | `http://localhost:11434/api` | Ollama API URL |
 | `EMBEDDINGS_MODEL` | No | `nomic-embed-text` | Ollama embedding model |
