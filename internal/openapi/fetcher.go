@@ -5,10 +5,11 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
 
 // FetchAndParse fetches the ArgoCD Swagger spec and returns the parsed endpoints.
@@ -58,9 +59,10 @@ func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (js
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	const maxSpecSize = 50 << 20 // 50 MB
+	body, err := httputil.ReadBody(resp.Body, maxSpecSize)
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, fmt.Errorf("read spec: %w", err)
 	}
 
 	return json.RawMessage(body), nil

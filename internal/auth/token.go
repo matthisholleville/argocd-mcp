@@ -2,10 +2,11 @@ package auth
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
 
 // HandleToken serves POST /token.
@@ -49,7 +50,8 @@ func HandleToken(dexTokenURL, clientID string) http.HandlerFunc {
 		}
 		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
+		const maxTokenResponseSize = 1 << 20 // 1 MB
+		body, err := httputil.ReadBody(resp.Body, maxTokenResponseSize)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read_error"})
 			return

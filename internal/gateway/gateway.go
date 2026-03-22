@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
+	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
 
 // Gateway proxies API requests to ArgoCD.
@@ -102,7 +103,8 @@ func (g *Gateway) Execute(ctx context.Context, params ExecuteParams) (json.RawMe
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	respBody, err := httputil.ReadBody(resp.Body, maxResponseSize)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
