@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 	"net/url"
 	"strings"
 
@@ -14,7 +15,7 @@ import (
 // Swaps the id_token into the access_token field because ArgoCD validates
 // the id_token (not the access_token) as the Bearer token.
 func HandleToken(dexTokenURL, clientID string) http.HandlerFunc {
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Timeout: 15 * time.Second}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
