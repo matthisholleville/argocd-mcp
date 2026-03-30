@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The entire ArgoCD API, exposed to LLMs via MCP.</strong><br/>
-  103+ endpoints. 2 tools. Zero hardcoded handlers.
+  103+ endpoints. Zero hardcoded handlers. Two modes: search or generated tools.
 </p>
 
 <p align="center">
@@ -22,17 +22,26 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 
 **argocd-mcp** takes a different approach, inspired by [Cloudflare's MCP server](https://github.com/cloudflare/mcp) which covers 2500+ endpoints with only 2 tools. It reads ArgoCD's OpenAPI spec at startup and exposes every endpoint through just 2 tools: `search` and `execute`. New ArgoCD version? Restart the server. Done.
 
-- **103+ endpoints**, 2 tools, ~200 tokens of system prompt
+- **103+ endpoints** from ArgoCD's OpenAPI spec, zero hardcoded handlers
+- **Two tool modes**: `search` (2 meta-tools) or `generated` (1 typed tool per endpoint)
 - Works with **Claude Desktop, Claude Code, Cursor**, or any MCP client
 - **No code per endpoint** — the OpenAPI spec is the source of truth
 - **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
 - **Resource scoping** — restrict which ArgoCD resources are exposed with `ALLOWED_RESOURCES`
+- **Rate limiting** — per-user token bucket to protect ArgoCD from excessive calls
 - **Prompt templates** — pre-packaged workflows for common operations (unhealthy apps, diff, rollback, logs)
 - **Audit logging** — structured JSON logs for every tool call (user, method, path, status, duration)
+- **MCP annotations** — tools are annotated as read-only, destructive, or idempotent for proper client categorization
 - **Optional semantic search** via Ollama embeddings
 
 ## How It Works
+
+At startup, the server fetches ArgoCD's Swagger spec and parses every endpoint. Then it exposes them to LLMs via one of two modes:
+
+### Search mode (default, `TOOL_MODE=search`)
+
+Two meta-tools handle all 103+ endpoints. The LLM discovers endpoints by searching, then calls them via a generic executor.
 
 ```mermaid
 graph TD
@@ -44,10 +53,32 @@ graph TD
     E -->|LLM calls API| G[Proxies to ArgoCD with user token]
 ```
 
-1. At startup, the server fetches ArgoCD's Swagger spec
-2. It parses every endpoint (method, path, summary, parameters, request body schema)
-3. **`search_operations`** — keyword or semantic search across all endpoints
-4. **`execute_operation`** — generic HTTP proxy to ArgoCD
+### Generated mode (`TOOL_MODE=generated`)
+
+One typed MCP tool per endpoint, generated dynamically at startup. The LLM calls `argocd_application_sync(name, revision)` directly — no search step, no path construction.
+
+```mermaid
+graph TD
+    A[ArgoCD /swagger.json] -->|Fetch at startup| B[Parse Swagger 2.0]
+    B --> C[103+ Endpoints]
+    C -->|Generate per endpoint| D[argocd_application_list]
+    C --> E[argocd_application_sync]
+    C --> F[argocd_cluster_get]
+    C --> G[... 100+ more tools]
+    D & E & F & G -->|Typed params, 1 call| H[Proxies to ArgoCD]
+```
+
+**Which mode to choose?**
+
+| | Search | Generated |
+|---|---|---|
+| Tools registered | 2 | 103+ |
+| LLM round-trips | 2 (search → execute) | 1 (direct call) |
+| Parameter typing | Raw JSON strings | Typed individual params |
+| Context usage | Low (~200 tokens) | Higher (mitigated by client deferred loading) |
+| Best for | Lightweight clients, constrained context | Claude Code, Claude Desktop, Cursor |
+
+Clients like Claude Code and Claude Desktop support **deferred tool loading** — they only load tool definitions into context when needed, so the 103+ tools don't consume context window upfront.
 
 ---
 
@@ -245,6 +276,52 @@ Matching is case-insensitive (`applicationservice` works).
 
 ---
 
+## Generated Tools Mode (optional)
+
+Set `TOOL_MODE=generated` to create one MCP tool per ArgoCD endpoint at startup. Instead of searching then executing, the LLM calls typed tools directly:
+
+```bash
+# Claude Code
+claude mcp add argocd -s user -- \
+  docker run --rm -i \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e ARGOCD_TOKEN=your-token \
+  -e TOOL_MODE=generated \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+<details>
+<summary><strong>How generated tools work</strong></summary>
+
+<br/>
+
+Each endpoint's `operationId` is converted to a snake_case tool name with `argocd_` prefix:
+
+| operationId | Tool name |
+|---|---|
+| `ApplicationService_Sync` | `argocd_application_sync` |
+| `ClusterService_Get` | `argocd_cluster_get` |
+| `ApplicationSetService_List` | `argocd_application_set_list` |
+
+Parameters are typed individually — no raw JSON needed for common cases:
+
+```
+argocd_application_sync(
+  name:      "frontend"      ← path param (required)
+  revision:  "HEAD"          ← body param, flattened
+  dryRun:    true            ← body param, flattened
+  strategy:  '{"apply":{}}'  ← nested object stays JSON string
+)
+```
+
+Tools are annotated with MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so clients like Claude Desktop categorize them correctly (read vs write/delete).
+
+`DISABLE_WRITE` and `ALLOWED_RESOURCES` are enforced at startup — forbidden tools are simply not generated. The LLM cannot even see them.
+
+</details>
+
+---
+
 ## Rate Limiting (optional)
 
 Protect ArgoCD from excessive API calls by setting `RATE_LIMIT`. Only `execute_operation` is rate limited — search is local and not affected.
@@ -329,6 +406,7 @@ Set `AUDIT_LOG=false` to disable.
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
 | `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs) |
+| `TOOL_MODE` | No | `search` | `search` (2 meta-tools) or `generated` (1 tool per endpoint) |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |
 | `RATE_LIMIT` | No | `0` (disabled) | Max `execute_operation` requests per second per user |

@@ -54,6 +54,9 @@ security:
   # -- Restrict to specific ArgoCD resource types (e.g. [ApplicationService, ProjectService])
   allowedResources: []
 
+# -- Tool mode: "search" (2 meta-tools) or "generated" (1 tool per endpoint)
+toolMode: search
+
 # -- Rate limiting (execute_operation only)
 rateLimit:
   # -- Max requests per second per user (0 = disabled)

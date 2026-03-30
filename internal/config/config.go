@@ -47,6 +47,8 @@ type Config struct {
 	// When set, only matching endpoints are searchable and executable.
 	// Empty means all resources are allowed.
 	AllowedResources []string
+	// ToolMode is "search" (default, 2 meta-tools) or "generated" (1 tool per endpoint).
+	ToolMode string
 	// RateLimit is the maximum number of execute_operation requests per second
 	// per user. Set to 0 to disable rate limiting.
 	RateLimit float64
@@ -89,6 +91,7 @@ func Load() (*Config, error) {
 		TLSInsecure:       tlsInsecure,
 		DisableWrite:      disableWrite,
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
+		ToolMode:          getEnvOrDefault("TOOL_MODE", "search"),
 		RateLimit:         rateLimit,
 		RateLimitBurst:    rateLimitBurst,
 		AuditLog:          auditLog,
@@ -108,6 +111,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.AuthMode == "oauth" && cfg.Transport != "http" {
 		errs = append(errs, "AUTH_MODE=oauth requires MCP_TRANSPORT=http")
+	}
+	if cfg.ToolMode != "search" && cfg.ToolMode != "generated" {
+		errs = append(errs, fmt.Sprintf("TOOL_MODE must be 'search' or 'generated', got %q", cfg.ToolMode))
 	}
 	if cfg.RateLimit < 0 {
 		errs = append(errs, "RATE_LIMIT must be >= 0")

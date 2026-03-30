@@ -12,6 +12,7 @@ func TestParseSpec(t *testing.T) {
 		"paths": {
 			"/api/v1/applications": {
 				"get": {
+					"operationId": "ApplicationService_List",
 					"summary": "List applications",
 					"tags": ["ApplicationService"],
 					"parameters": [
@@ -19,6 +20,7 @@ func TestParseSpec(t *testing.T) {
 					]
 				},
 				"post": {
+					"operationId": "ApplicationService_Create",
 					"summary": "Create application",
 					"tags": ["ApplicationService"],
 					"parameters": [
@@ -28,6 +30,7 @@ func TestParseSpec(t *testing.T) {
 			},
 			"/api/v1/applications/{name}": {
 				"delete": {
+					"operationId": "ApplicationService_Delete",
 					"summary": "Delete application",
 					"tags": ["ApplicationService"],
 					"parameters": [
@@ -67,6 +70,196 @@ func TestParseSpec(t *testing.T) {
 	}
 	if postApp.RequestBody == "" {
 		t.Error("expected request body, got empty")
+	}
+}
+
+func TestParseSpec_OperationID(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/api/v1/applications": {
+				"get": {
+					"operationId": "ApplicationService_List",
+					"summary": "List applications",
+					"tags": ["ApplicationService"]
+				}
+			},
+			"/api/v1/clusters": {
+				"get": {
+					"operationId": "ClusterService_List",
+					"summary": "List clusters",
+					"tags": ["ClusterService"]
+				}
+			}
+		},
+		"definitions": {}
+	}`
+
+	endpoints, err := ParseSpec(json.RawMessage(spec))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	for _, ep := range endpoints {
+		if ep.OperationID == "" {
+			t.Errorf("expected operationId for %s %s", ep.Method, ep.Path)
+		}
+	}
+
+	// Verify specific IDs (sorted by path).
+	if endpoints[0].OperationID != "ApplicationService_List" {
+		t.Errorf("expected ApplicationService_List, got %s", endpoints[0].OperationID)
+	}
+	if endpoints[1].OperationID != "ClusterService_List" {
+		t.Errorf("expected ClusterService_List, got %s", endpoints[1].OperationID)
+	}
+}
+
+func TestParseSpec_OperationID_Missing(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/api/v1/version": {
+				"get": {
+					"summary": "Get version"
+				}
+			}
+		},
+		"definitions": {}
+	}`
+
+	endpoints, err := ParseSpec(json.RawMessage(spec))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+	if endpoints[0].OperationID != "" {
+		t.Errorf("expected empty operationId, got %q", endpoints[0].OperationID)
+	}
+}
+
+func TestParseSpec_BodyProperties(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/api/v1/applications/{name}/sync": {
+				"post": {
+					"operationId": "ApplicationService_Sync",
+					"summary": "Sync application",
+					"parameters": [
+						{"name": "name", "in": "path", "required": true, "type": "string"},
+						{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/SyncRequest"}}
+					]
+				}
+			}
+		},
+		"definitions": {
+			"SyncRequest": {
+				"required": ["revision"],
+				"properties": {
+					"revision": {"type": "string", "description": "Target revision"},
+					"dryRun": {"type": "boolean", "description": "Simulate sync"},
+					"prune": {"type": "boolean", "description": "Allow prune"},
+					"strategy": {"description": "Sync strategy"}
+				}
+			}
+		}
+	}`
+
+	endpoints, err := ParseSpec(json.RawMessage(spec))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+
+	ep := endpoints[0]
+	if len(ep.BodyProperties) != 4 {
+		t.Fatalf("expected 4 body properties, got %d", len(ep.BodyProperties))
+	}
+
+	// Properties are sorted alphabetically.
+	expected := []struct {
+		name     string
+		typ      string
+		required bool
+	}{
+		{"dryRun", "boolean", false},
+		{"prune", "boolean", false},
+		{"revision", "string", true},
+		{"strategy", "object", false}, // no type → defaults to "object"
+	}
+
+	for i, exp := range expected {
+		got := ep.BodyProperties[i]
+		if got.Name != exp.name {
+			t.Errorf("prop %d: name = %q, want %q", i, got.Name, exp.name)
+		}
+		if got.Type != exp.typ {
+			t.Errorf("prop %d (%s): type = %q, want %q", i, exp.name, got.Type, exp.typ)
+		}
+		if got.Required != exp.required {
+			t.Errorf("prop %d (%s): required = %v, want %v", i, exp.name, got.Required, exp.required)
+		}
+	}
+
+	// revision should have a description.
+	for _, bp := range ep.BodyProperties {
+		if bp.Name == "revision" && bp.Description != "Target revision" {
+			t.Errorf("revision description = %q, want 'Target revision'", bp.Description)
+		}
+	}
+}
+
+func TestParseSpec_BodyProperties_NoRef(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/api/v1/applications": {
+				"get": {
+					"operationId": "ApplicationService_List",
+					"summary": "List applications"
+				}
+			}
+		},
+		"definitions": {}
+	}`
+
+	endpoints, err := ParseSpec(json.RawMessage(spec))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(endpoints[0].BodyProperties) != 0 {
+		t.Errorf("expected no body properties for GET, got %d", len(endpoints[0].BodyProperties))
+	}
+}
+
+func TestParseSpec_BodyProperties_UnknownRef(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/api/v1/test": {
+				"post": {
+					"operationId": "Test_Create",
+					"summary": "Test",
+					"parameters": [
+						{"name": "body", "in": "body", "schema": {"$ref": "#/definitions/NonExistent"}}
+					]
+				}
+			}
+		},
+		"definitions": {}
+	}`
+
+	endpoints, err := ParseSpec(json.RawMessage(spec))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(endpoints[0].BodyProperties) != 0 {
+		t.Errorf("expected no body properties for missing ref, got %d", len(endpoints[0].BodyProperties))
 	}
 }
 

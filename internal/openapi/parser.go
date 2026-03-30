@@ -41,6 +41,7 @@ func ParseSpec(raw json.RawMessage) ([]Endpoint, error) {
 
 func parseOperation(raw json.RawMessage, method, path string, definitions map[string]json.RawMessage) (Endpoint, error) {
 	var op struct {
+		OperationID string   `json:"operationId"`
 		Summary     string   `json:"summary"`
 		Description string   `json:"description"`
 		Tags        []string `json:"tags"`
@@ -61,10 +62,12 @@ func parseOperation(raw json.RawMessage, method, path string, definitions map[st
 
 	params := make([]Parameter, 0, len(op.Parameters))
 	var requestBody string
+	var bodyProps []BodyProperty
 
 	for _, p := range op.Parameters {
 		if p.In == "body" && p.Schema != nil && p.Schema.Ref != "" {
 			requestBody = resolveRefSummary(p.Schema.Ref, definitions)
+			bodyProps = resolveBodyProperties(p.Schema.Ref, definitions)
 			continue
 		}
 		params = append(params, Parameter{
@@ -77,13 +80,15 @@ func parseOperation(raw json.RawMessage, method, path string, definitions map[st
 	}
 
 	return Endpoint{
-		Method:      method,
-		Path:        path,
-		Summary:     op.Summary,
-		Description: truncate(op.Description, 300),
-		Tags:        op.Tags,
-		Parameters:  params,
-		RequestBody: requestBody,
+		Method:         method,
+		Path:           path,
+		Summary:        op.Summary,
+		Description:    truncate(op.Description, 300),
+		Tags:           op.Tags,
+		Parameters:     params,
+		RequestBody:    requestBody,
+		OperationID:    op.OperationID,
+		BodyProperties: bodyProps,
 	}, nil
 }
 
@@ -118,6 +123,52 @@ func resolveRefSummary(ref string, definitions map[string]json.RawMessage) strin
 	}
 	sort.Strings(fields)
 	return name + "{" + strings.Join(fields, ", ") + "}"
+}
+
+// resolveBodyProperties extracts top-level properties from a $ref definition
+// as individual BodyProperty entries for use in generated tools mode.
+func resolveBodyProperties(ref string, definitions map[string]json.RawMessage) []BodyProperty {
+	parts := strings.Split(ref, "/")
+	name := parts[len(parts)-1]
+
+	raw, ok := definitions[name]
+	if !ok {
+		return nil
+	}
+
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+
+	requiredSet := make(map[string]bool, len(schema.Required))
+	for _, r := range schema.Required {
+		requiredSet[r] = true
+	}
+
+	props := make([]BodyProperty, 0, len(schema.Properties))
+	for k, v := range schema.Properties {
+		typ := v.Type
+		if typ == "" {
+			typ = "object"
+		}
+		props = append(props, BodyProperty{
+			Name:        k,
+			Type:        typ,
+			Description: v.Description,
+			Required:    requiredSet[k],
+		})
+	}
+	sort.Slice(props, func(i, j int) bool {
+		return props[i].Name < props[j].Name
+	})
+	return props
 }
 
 // FilterReadOnly returns a new slice containing only read-only endpoints (GET, HEAD, OPTIONS).

@@ -89,6 +89,8 @@ spec:
             - name: ALLOWED_RESOURCES
               value: {{ join "," .Values.security.allowedResources | quote }}
             {{- end }}
+            - name: TOOL_MODE
+              value: {{ .Values.toolMode | quote }}
             {{- if .Values.rateLimit.requestsPerSecond }}
             - name: RATE_LIMIT
               value: {{ .Values.rateLimit.requestsPerSecond | quote }}

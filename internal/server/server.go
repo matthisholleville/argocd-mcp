@@ -18,6 +18,7 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
+	"github.com/matthisholleville/argocd-mcp/internal/toolgen"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -116,16 +117,30 @@ func Run(cfg *config.Config, version string) error {
 
 	gateway.RegisterMCPPrompts(mcpServer)
 
-	gateway.RegisterMCPTools(mcpServer, gateway.ToolOptions{
-		EndpointCount:    len(endpoints),
-		DisableWrite:     cfg.DisableWrite,
-		AllowedResources: cfg.AllowedResources,
-	}, searcher, gw, allowed, limiter, auditor)
+	switch cfg.ToolMode {
+	case "generated":
+		exec := toolgen.NewGatewayAdapter(gw)
+		generated := toolgen.GenerateAll(endpoints, exec, limiter, auditor, cfg.DisableWrite)
+		for _, gt := range generated {
+			mcpServer.AddTool(gt.Tool, gt.Handler)
+		}
+		logger.Info("generated tools mode",
+			slog.Int("tools_registered", len(generated)),
+			slog.Int("endpoints_total", len(endpoints)),
+		)
+	default: // "search"
+		gateway.RegisterMCPTools(mcpServer, gateway.ToolOptions{
+			EndpointCount:    len(endpoints),
+			DisableWrite:     cfg.DisableWrite,
+			AllowedResources: cfg.AllowedResources,
+		}, searcher, gw, allowed, limiter, auditor)
+	}
 
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
 		slog.String("auth_mode", cfg.AuthMode),
 		slog.String("argocd", cfg.ArgoCDBaseURL),
+		slog.String("tool_mode", cfg.ToolMode),
 		slog.Int("endpoints", len(endpoints)),
 		slog.Bool("embeddings", cfg.EmbeddingsEnabled),
 		slog.Bool("disable_write", cfg.DisableWrite),
