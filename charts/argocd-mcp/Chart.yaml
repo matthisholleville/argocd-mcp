@@ -2,8 +2,8 @@ apiVersion: v2
 name: argocd-mcp
 description: OpenAPI-driven MCP server that exposes the entire ArgoCD API to LLMs
 type: application
-version: 1.5.0
-appVersion: 1.5.0
+version: 1.6.0
+appVersion: 1.6.0
 home: https://github.com/matthisholleville/argocd-mcp
 sources:
   - https://github.com/matthisholleville/argocd-mcp
