@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.5.0...v1.6.0) (2026-03-30)
+
+
+### Features
+
+* add generated tools mode (TOOL_MODE=generated) ([28625c1](https://github.com/matthisholleville/argocd-mcp/commit/28625c152f935b035d2f97bf68bac475c6e1dacb))
+
 ## [1.5.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.4.0...v1.5.0) (2026-03-22)
 
 
