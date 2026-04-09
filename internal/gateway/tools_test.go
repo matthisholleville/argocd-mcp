@@ -26,7 +26,11 @@ func newTestGateway(t *testing.T) *Gateway {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(srv.Close)
-	return NewGateway(srv.URL, "test-token", false, slog.Default())
+	gw, err := NewGateway(srv.URL, "test-token", false, "", slog.Default())
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	return gw
 }
 
 func buildCallToolRequest(t *testing.T, args map[string]any) mcp.CallToolRequest {

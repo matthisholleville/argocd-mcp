@@ -2,10 +2,11 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"time"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
@@ -14,10 +15,23 @@ import (
 // Proxies the token exchange to ArgoCD's Dex token endpoint.
 // Swaps the id_token into the access_token field because ArgoCD validates
 // the id_token (not the access_token) as the Bearer token.
-func HandleToken(dexTokenURL, clientID string) http.HandlerFunc {
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+//
+// tlsInsecure and caBundlePath must match the values used by the OpenAPI
+// fetcher and the API gateway so that a single TLS policy covers every
+// outbound HTTP client in the server. Without this, OAuth mode silently
+// breaks behind a private PKI: spec load succeeds (it honors the flags)
+// while /token fails with "could not reach Dex token endpoint".
+func HandleToken(dexTokenURL, clientID string, tlsInsecure bool, caBundlePath string) (http.HandlerFunc, error) {
+	httpClient, err := httputil.NewClient(httputil.ClientOptions{
+		Timeout:      15 * time.Second,
+		TLSInsecure:  tlsInsecure,
+		CABundlePath: caBundlePath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build token http client: %w", err)
+	}
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
@@ -85,4 +99,6 @@ func HandleToken(dexTokenURL, clientID string) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(tokenResp)
 	}
+
+	return handler, nil
 }

@@ -37,8 +37,15 @@ type Config struct {
 	EmbeddingsModel string
 	// TLSInsecure disables TLS certificate verification when connecting to ArgoCD.
 	// Defaults to false (secure). Set to true only when ArgoCD uses self-signed
-	// certificates that cannot be added to the trust store.
+	// certificates that cannot be added to the trust store. Prefer CABundlePath
+	// in production — it keeps verification on while trusting a custom PKI.
 	TLSInsecure bool
+	// CABundlePath points at a PEM-encoded CA bundle on disk. When set, the
+	// file is appended to the system trust pool for every outbound HTTP client
+	// the server uses (OpenAPI fetcher, API gateway, Dex OAuth token proxy).
+	// This is the recommended way to run against ArgoCD served behind a
+	// private PKI (Vault, internal CA, etc.) without disabling TLS verification.
+	CABundlePath string
 	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
 	// from search results and blocks their execution.
 	DisableWrite bool
@@ -89,6 +96,7 @@ func Load() (*Config, error) {
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
 		TLSInsecure:       tlsInsecure,
+		CABundlePath:      os.Getenv("ARGOCD_CA_BUNDLE"),
 		DisableWrite:      disableWrite,
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
 		ToolMode:          getEnvOrDefault("TOOL_MODE", "search"),
