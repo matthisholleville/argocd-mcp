@@ -1,11 +1,12 @@
 package auth
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
-	"time"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
@@ -14,8 +15,20 @@ import (
 // Proxies the token exchange to ArgoCD's Dex token endpoint.
 // Swaps the id_token into the access_token field because ArgoCD validates
 // the id_token (not the access_token) as the Bearer token.
-func HandleToken(dexTokenURL, clientID string) http.HandlerFunc {
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+//
+// When tlsInsecure is true, TLS certificate verification is skipped on the
+// upstream Dex connection. This must be kept in sync with the fetcher and
+// gateway clients so that a single ARGOCD_TLS_INSECURE setting covers the
+// whole server.
+func HandleToken(dexTokenURL, clientID string, tlsInsecure bool) http.HandlerFunc {
+	httpClient := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
+			},
+		},
+	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
