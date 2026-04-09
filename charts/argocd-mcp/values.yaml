@@ -28,8 +28,15 @@ argocd:
   existingSecret: ""
   # -- Override the default swagger.json URL
   specURL: ""
-  # -- Skip TLS certificate verification (for self-signed certs)
+  # -- Skip TLS certificate verification (for self-signed certs). Prefer
+  # mounting a CA bundle via extraVolumes/extraEnv and pointing
+  # ARGOCD_CA_BUNDLE at it when running behind a private PKI.
   tlsInsecure: false
+  # -- Path inside the container to a PEM-encoded CA bundle. When set, the
+  # chart sets ARGOCD_CA_BUNDLE to this value. You are responsible for
+  # mounting the file via extraVolumes/extraVolumeMounts (typically from a
+  # Secret or ConfigMap that holds your private PKI root).
+  caBundlePath: ""
 
 # -- Authentication settings
 auth:
@@ -149,6 +156,33 @@ securityContext:
       - ALL
   seccompProfile:
     type: RuntimeDefault
+
+# -- Additional environment variables passed to the container.
+# Each entry is a standard corev1.EnvVar, so valueFrom/secretKeyRef are
+# supported for pulling credentials out of a Secret without putting them
+# in values.yaml.
+# @default -- `[]`
+extraEnv: []
+#  - name: HTTPS_PROXY
+#    value: http://proxy.internal:3128
+#  - name: ARGOCD_CA_BUNDLE
+#    value: /etc/ssl/argocd/ca-bundle.pem
+
+# -- Additional volumes to attach to the pod. Useful for mounting a CA
+# bundle (Secret/ConfigMap) that ARGOCD_CA_BUNDLE then points at.
+# @default -- `[]`
+extraVolumes: []
+#  - name: argocd-ca
+#    secret:
+#      secretName: argocd-ca-bundle
+
+# -- Additional volume mounts for the argocd-mcp container. Paired with
+# extraVolumes above.
+# @default -- `[]`
+extraVolumeMounts: []
+#  - name: argocd-ca
+#    mountPath: /etc/ssl/argocd
+#    readOnly: true
 
 # -- Node selector
 nodeSelector: {}

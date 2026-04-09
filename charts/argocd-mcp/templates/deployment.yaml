@@ -77,6 +77,10 @@ spec:
             {{- end }}
             - name: ARGOCD_TLS_INSECURE
               value: {{ .Values.argocd.tlsInsecure | quote }}
+            {{- if .Values.argocd.caBundlePath }}
+            - name: ARGOCD_CA_BUNDLE
+              value: {{ .Values.argocd.caBundlePath | quote }}
+            {{- end }}
             {{- if eq .Values.auth.mode "oauth" }}
             - name: DEX_CLIENT_ID
               value: {{ .Values.auth.dexClientID | quote }}
@@ -109,6 +113,17 @@ spec:
             - name: EMBEDDINGS_MODEL
               value: {{ .Values.embeddings.model | quote }}
             {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
