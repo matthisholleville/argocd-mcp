@@ -3,16 +3,36 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func silentLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// pemEncodeCertificate wraps a DER-encoded certificate in a PEM block. Used
+// by the CA bundle tests to dump httptest server certs to disk.
+func pemEncodeCertificate(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// writeTempCABundle writes the given PEM bytes to a fresh file under the
+// test's temp dir and returns the absolute path.
+func writeTempCABundle(t *testing.T, pemBytes []byte) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(p, pemBytes, 0o600); err != nil {
+		t.Fatalf("write CA bundle: %v", err)
+	}
+	return p
 }
 
 // --- HandleAuthorize tests ---
@@ -127,7 +147,10 @@ func TestHandleToken_SwapsIdTokenToAccessToken(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -158,7 +181,10 @@ func TestHandleToken_NoIdToken_NoSwap(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -182,7 +208,10 @@ func TestHandleToken_InvalidJSON_ForwardsRawBody(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -208,7 +237,10 @@ func TestHandleToken_ForwardsClientID(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "my-client")
+	handler, err := HandleToken(dex.URL, "my-client", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc&client_id=attacker"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -229,7 +261,10 @@ func TestHandleToken_ForwardsDexError(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=bad"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -252,7 +287,10 @@ func TestHandleToken_DexUnreachable(t *testing.T) {
 	dexURL := dex.URL
 	dex.Close()
 
-	handler := HandleToken(dexURL, "argo-cd-cli")
+	handler, err := HandleToken(dexURL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -261,6 +299,120 @@ func TestHandleToken_DexUnreachable(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+}
+
+// When tlsInsecure=true, the token proxy must accept self-signed certs on
+// the upstream Dex endpoint. This mirrors the behavior already implemented
+// in the openapi fetcher and gateway clients so that a single
+// ARGOCD_TLS_INSECURE flag covers every HTTP client path.
+func TestHandleToken_TLSInsecure_AllowsSelfSignedDex(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "opaque-access",
+			"id_token":     "jwt-id-token",
+			"token_type":   "bearer",
+		})
+	}))
+	defer dex.Close()
+
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", true, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from insecure TLS upstream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp["access_token"] != "jwt-id-token" {
+		t.Errorf("expected swapped access_token, got %v", resp["access_token"])
+	}
+}
+
+// With tlsInsecure=false (default), the token proxy must refuse self-signed
+// certs and fail closed with 502 — regression guard against accidentally
+// reintroducing the default-insecure-client bug.
+func TestHandleToken_TLSSecure_RejectsSelfSignedDex(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": "jwt"})
+	}))
+	defer dex.Close()
+
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, "")
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 when upstream cert is not trusted, got %d", rec.Code)
+	}
+}
+
+// With a custom CA bundle, the token proxy must trust the upstream Dex cert
+// signed by that CA — this is the primary production path for deployments
+// behind a private PKI (Vault, internal CA, etc.).
+func TestHandleToken_CABundlePath_TrustsCustomCA(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "opaque",
+			"id_token":     "jwt",
+			"token_type":   "bearer",
+		})
+	}))
+	defer dex.Close()
+
+	// Dump the test server's self-signed cert into a PEM bundle on disk, the
+	// same way a real deployment would mount a ConfigMap/Secret with the PKI
+	// root at /etc/ssl/certs/ca-bundle.pem.
+	leaf := dex.Certificate()
+	pemBytes := pemEncodeCertificate(leaf.Raw)
+	bundlePath := writeTempCABundle(t, pemBytes)
+
+	handler, err := HandleToken(dex.URL, "argo-cd-cli", false, bundlePath)
+	if err != nil {
+		t.Fatalf("HandleToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with custom CA bundle, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp["access_token"] != "jwt" {
+		t.Errorf("expected id_token swapped into access_token, got %v", resp["access_token"])
+	}
+}
+
+// A bad CA bundle path must be surfaced at handler construction time, not
+// on the first request with a confusing 502.
+func TestHandleToken_CABundlePath_MissingFile_FailsFast(t *testing.T) {
+	_, err := HandleToken("https://argocd.example.com/api/dex/token", "argo-cd-cli", false, "/definitely/not/a/real/path.pem")
+	if err == nil {
+		t.Fatal("expected error for missing CA bundle file, got nil")
 	}
 }
 

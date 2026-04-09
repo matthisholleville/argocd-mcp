@@ -406,6 +406,7 @@ Set `AUDIT_LOG=false` to disable.
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
 | `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs) |
+| `ARGOCD_CA_BUNDLE` | No | | Path to a PEM-encoded CA bundle appended to the system trust pool. Preferred over `ARGOCD_TLS_INSECURE` for ArgoCD behind a private PKI (Vault, internal CA). |
 | `TOOL_MODE` | No | `search` | `search` (2 meta-tools) or `generated` (1 tool per endpoint) |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |

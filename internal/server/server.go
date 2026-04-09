@@ -37,12 +37,15 @@ func Run(cfg *config.Config, version string) error {
 	if cfg.TLSInsecure {
 		logger.Warn("TLS certificate verification is DISABLED (ARGOCD_TLS_INSECURE=true)")
 	}
+	if cfg.CABundlePath != "" {
+		logger.Info("using custom CA bundle", slog.String("path", cfg.CABundlePath))
+	}
 
 	const fetchSpecTimeout = 30 * time.Second
 	fetchCtx, fetchCancel := context.WithTimeout(ctx, fetchSpecTimeout)
 	defer fetchCancel()
 
-	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
+	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, cfg.CABundlePath, logger)
 	if err != nil {
 		logger.Error("failed to load ArgoCD spec", slog.String("url", cfg.SpecURL), slog.String("error", err.Error()))
 		return fmt.Errorf("load ArgoCD spec: %w", err)
@@ -81,7 +84,11 @@ func Run(cfg *config.Config, version string) error {
 	}
 
 	// 3. Build the gateway.
-	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
+	gw, err := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, cfg.TLSInsecure, cfg.CABundlePath, logger)
+	if err != nil {
+		logger.Error("failed to build gateway", slog.String("error", err.Error()))
+		return fmt.Errorf("build gateway: %w", err)
+	}
 
 	// 4. Create MCP server.
 	mcpServer := server.NewMCPServer(
@@ -207,7 +214,9 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 	})
 
 	if cfg.AuthMode == "oauth" {
-		mountOAuth(mux, httpSrv, cfg, logger)
+		if err := mountOAuth(mux, httpSrv, cfg, logger); err != nil {
+			return fmt.Errorf("mount oauth: %w", err)
+		}
 	} else {
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
@@ -241,15 +250,20 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 	}
 }
 
-func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) {
+func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) error {
 	dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
+
+	tokenHandler, err := auth.HandleToken(dexBase+"/token", cfg.DexClientID, cfg.TLSInsecure, cfg.CABundlePath)
+	if err != nil {
+		return fmt.Errorf("build token handler: %w", err)
+	}
 
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID, logger))
 	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(dexBase+"/auth", cfg.DexClientID))
-	mux.HandleFunc("POST /token", auth.HandleToken(dexBase+"/token", cfg.DexClientID))
+	mux.HandleFunc("POST /token", tokenHandler)
 
 	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
 	mux.Handle("/mcp", authMiddleware(httpSrv))
@@ -258,6 +272,7 @@ func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, lo
 		slog.String("dex_issuer", dexBase),
 		slog.String("client_id", cfg.DexClientID),
 	)
+	return nil
 }
 
 func buildHooks(logger *slog.Logger) *server.Hooks {

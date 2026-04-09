@@ -2,7 +2,6 @@ package openapi
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,10 +11,10 @@ import (
 )
 
 // FetchAndParse fetches the ArgoCD Swagger spec and returns the parsed endpoints.
-func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool, logger *slog.Logger) ([]Endpoint, error) {
+func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool, caBundlePath string, logger *slog.Logger) ([]Endpoint, error) {
 	logger.Info("fetching ArgoCD OpenAPI spec", slog.String("url", specURL))
 
-	raw, err := fetchSpec(ctx, specURL, token, tlsInsecure)
+	raw, err := fetchSpec(ctx, specURL, token, tlsInsecure, caBundlePath)
 	if err != nil {
 		return nil, fmt.Errorf("fetch spec: %w", err)
 	}
@@ -29,14 +28,14 @@ func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool,
 	return endpoints, nil
 }
 
-func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (json.RawMessage, error) {
+func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool, caBundlePath string) (json.RawMessage, error) {
 	// Timeout is governed by the ctx deadline passed by the caller.
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
-			},
-		},
+	client, err := httputil.NewClient(httputil.ClientOptions{
+		TLSInsecure:  tlsInsecure,
+		CABundlePath: caBundlePath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build http client: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)

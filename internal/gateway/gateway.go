@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,21 +24,24 @@ type Gateway struct {
 }
 
 // NewGateway creates a Gateway targeting the given ArgoCD instance.
-// When tlsInsecure is true, TLS certificate verification is skipped.
-func NewGateway(baseURL, staticToken string, tlsInsecure bool, logger *slog.Logger) *Gateway {
+// When tlsInsecure is true, TLS certificate verification is skipped. When
+// caBundlePath is non-empty, the PEM file is appended to the system trust
+// pool — preferred over tlsInsecure for private PKI deployments.
+func NewGateway(baseURL, staticToken string, tlsInsecure bool, caBundlePath string, logger *slog.Logger) (*Gateway, error) {
+	client, err := httputil.NewClient(httputil.ClientOptions{
+		Timeout:      30 * time.Second,
+		TLSInsecure:  tlsInsecure,
+		CABundlePath: caBundlePath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build gateway http client: %w", err)
+	}
 	return &Gateway{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   staticToken,
 		logger:  logger,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
-				},
-			},
-		},
-	}
+		client:  client,
+	}, nil
 }
 
 // ExecuteParams holds the input for an execute_operation call.
