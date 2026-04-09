@@ -127,7 +127,7 @@ func TestHandleToken_SwapsIdTokenToAccessToken(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(dex.URL, "argo-cd-cli", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -158,7 +158,7 @@ func TestHandleToken_NoIdToken_NoSwap(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(dex.URL, "argo-cd-cli", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -182,7 +182,7 @@ func TestHandleToken_InvalidJSON_ForwardsRawBody(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(dex.URL, "argo-cd-cli", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -208,7 +208,7 @@ func TestHandleToken_ForwardsClientID(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "my-client")
+	handler := HandleToken(dex.URL, "my-client", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc&client_id=attacker"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -229,7 +229,7 @@ func TestHandleToken_ForwardsDexError(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(dex.URL, "argo-cd-cli", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=bad"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestHandleToken_DexUnreachable(t *testing.T) {
 	dexURL := dex.URL
 	dex.Close()
 
-	handler := HandleToken(dexURL, "argo-cd-cli")
+	handler := HandleToken(dexURL, "argo-cd-cli", false)
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -261,6 +261,62 @@ func TestHandleToken_DexUnreachable(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+}
+
+// When tlsInsecure=true, the token proxy must accept self-signed certs on
+// the upstream Dex endpoint. This mirrors the behavior already implemented
+// in the openapi fetcher and gateway clients so that a single
+// ARGOCD_TLS_INSECURE flag covers every HTTP client path.
+func TestHandleToken_TLSInsecure_AllowsSelfSignedDex(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "opaque-access",
+			"id_token":     "jwt-id-token",
+			"token_type":   "bearer",
+		})
+	}))
+	defer dex.Close()
+
+	handler := HandleToken(dex.URL, "argo-cd-cli", true)
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from insecure TLS upstream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp["access_token"] != "jwt-id-token" {
+		t.Errorf("expected swapped access_token, got %v", resp["access_token"])
+	}
+}
+
+// With tlsInsecure=false (default), the token proxy must refuse self-signed
+// certs and fail closed with 502 — regression guard against accidentally
+// reintroducing the default-insecure-client bug.
+func TestHandleToken_TLSSecure_RejectsSelfSignedDex(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": "jwt"})
+	}))
+	defer dex.Close()
+
+	handler := HandleToken(dex.URL, "argo-cd-cli", false)
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 when upstream cert is not trusted, got %d", rec.Code)
 	}
 }
 
