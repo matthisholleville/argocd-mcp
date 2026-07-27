@@ -38,6 +38,26 @@ func TestLoad_OIDCNoExplicitProvider(t *testing.T) {
 	if cfg.OIDCScopes != "openid profile email groups" {
 		t.Errorf("unexpected default scopes: %q", cfg.OIDCScopes)
 	}
+	// Defaults on: MCP clients bind loopback ports no provider can pre-register.
+	if !cfg.OIDCProxyCallback {
+		t.Error("expected the proxied callback to be on by default")
+	}
+}
+
+func TestLoad_OIDCProxyCallbackDisabled(t *testing.T) {
+	envs := minimalEnv()
+	envs["AUTH_MODE"] = "oidc"
+	envs["MCP_TRANSPORT"] = "http"
+	envs["OIDC_PROXY_CALLBACK"] = "false"
+	setEnvs(t, envs)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.OIDCProxyCallback {
+		t.Error("expected the proxied callback to be off")
+	}
 }
 
 // Half a provider cannot be completed by discovery, since discovery reads the

@@ -105,6 +105,8 @@ spec:
             - name: OIDC_SCOPES
               value: {{ . | quote }}
             {{- end }}
+            - name: OIDC_PROXY_CALLBACK
+              value: {{ .Values.auth.oidc.proxyCallback | quote }}
             {{- with .Values.auth.oidc.requestedIDTokenClaims }}
             {{- /* Values mirror ArgoCD's requestedIDTokenClaims, i.e. the inner
                    claim set; the OIDC `claims` parameter wraps it in id_token. */}}

@@ -254,6 +254,9 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, proxy
 type oauthProxy struct {
 	authorize auth.AuthorizeOptions
 	token     auth.TokenOptions
+	// stateCodec is set when this server terminates the provider's callback
+	// itself; it is what /oauth/callback needs to find the client again.
+	stateCodec *auth.StateCodec
 }
 
 // resolveOAuthProxy works out which provider to proxy to, reaching out to
@@ -282,6 +285,16 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 	case "oidc":
 		client := &http.Client{Timeout: 15 * time.Second}
 
+		var callbackURL string
+		var stateCodec *auth.StateCodec
+		if cfg.OIDCProxyCallback {
+			var err error
+			if stateCodec, err = auth.NewStateCodec(); err != nil {
+				return nil, fmt.Errorf("oidc setup: %w", err)
+			}
+			callbackURL = strings.TrimRight(cfg.ServerBaseURL, "/") + auth.CallbackPath
+		}
+
 		issuer, clientID := cfg.OIDCIssuer, cfg.OIDCClientID
 		if issuer == "" {
 			settings, err := auth.DiscoverArgoCDOIDC(ctx, client, cfg.ArgoCDBaseURL)
@@ -304,6 +317,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 			slog.String("issuer", issuer),
 			slog.String("client_id", clientID),
 			slog.Bool("confidential_client", cfg.OIDCClientSecret != ""),
+			slog.String("registered_redirect_uri", callbackURL),
 		)
 		return &oauthProxy{
 			authorize: auth.AuthorizeOptions{
@@ -311,12 +325,16 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 				ClientID:               clientID,
 				Scopes:                 cfg.OIDCScopes,
 				RequestedIDTokenClaims: cfg.OIDCRequestedIDTokenClaims,
+				CallbackURL:            callbackURL,
+				StateCodec:             stateCodec,
 			},
 			token: auth.TokenOptions{
 				TokenEndpoint: endpoints.TokenEndpoint,
 				ClientID:      clientID,
 				ClientSecret:  cfg.OIDCClientSecret,
+				RedirectURI:   callbackURL,
 			},
+			stateCodec: stateCodec,
 		}, nil
 
 	default:
@@ -338,6 +356,9 @@ func mountOAuthProxy(
 	mux.HandleFunc("POST /register", auth.HandleRegister(authorize.ClientID, logger))
 	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(authorize))
 	mux.HandleFunc("POST /token", auth.HandleToken(token))
+	if proxy.stateCodec != nil {
+		mux.HandleFunc("GET "+auth.CallbackPath, auth.HandleCallback(proxy.stateCodec, logger))
+	}
 
 	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
 	mux.Handle("/mcp", authMiddleware(httpSrv))

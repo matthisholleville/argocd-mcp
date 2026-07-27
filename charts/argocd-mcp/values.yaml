@@ -55,6 +55,11 @@ auth:
     existingSecretKey: client_secret
     # -- Space-separated scopes. Empty uses the server default
     scopes: ""
+    # -- Let this server, rather than each MCP client, be the redirect target
+    # registered at the provider. Keep on unless the provider accepts arbitrary
+    # loopback redirects the way Dex does: register
+    # {auth.serverBaseURL}/oauth/callback once and clients need no registration
+    proxyCallback: true
     # -- Claims to request in the id_token, mirroring ArgoCD's
     # requestedIDTokenClaims. Needed when the provider only emits a claim on
     # request, e.g. groups for ArgoCD RBAC:

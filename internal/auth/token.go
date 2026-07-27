@@ -21,6 +21,10 @@ type TokenOptions struct {
 	// argo-cd-cli, which rely on PKCE alone. The secret stays server-side: MCP
 	// clients still register as public against this server.
 	ClientSecret string
+	// RedirectURI overrides the client's redirect_uri on the exchange. Required
+	// when /authorize substituted this server's callback, because the provider
+	// checks that the code is redeemed against the redirect it was issued for.
+	RedirectURI string
 }
 
 // HandleToken serves POST /token.
@@ -46,6 +50,9 @@ func HandleToken(opts TokenOptions) http.HandlerFunc {
 		form.Set("client_id", opts.ClientID)
 		if opts.ClientSecret != "" {
 			form.Set("client_secret", opts.ClientSecret)
+		}
+		if opts.RedirectURI != "" {
+			form.Set("redirect_uri", opts.RedirectURI)
 		}
 
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, opts.TokenEndpoint,

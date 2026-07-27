@@ -43,6 +43,11 @@ type Config struct {
 	OIDCClientSecret string
 	// OIDCScopes are the scopes requested in oidc mode.
 	OIDCScopes string
+	// OIDCProxyCallback makes this server, rather than the MCP client, the
+	// redirect target registered at the provider. On by default: MCP clients
+	// bind loopback ports that cannot be pre-registered, and unlike Dex most
+	// providers require an exact redirect_uri match.
+	OIDCProxyCallback bool
 	// OIDCRequestedIDTokenClaims is raw JSON forwarded as the OIDC `claims`
 	// request parameter, mirroring ArgoCD's requestedIDTokenClaims. Needed when
 	// the provider only emits a claim on request, e.g. groups for ArgoCD RBAC.
@@ -94,6 +99,8 @@ func Load() (*Config, error) {
 	errs = appendIfErr(errs, err)
 	rateLimitBurst, err := parseInt("RATE_LIMIT_BURST", 0)
 	errs = appendIfErr(errs, err)
+	oidcProxyCallback, err := parseBool("OIDC_PROXY_CALLBACK", true)
+	errs = appendIfErr(errs, err)
 
 	cfg := &Config{
 		Transport:     getEnvOrDefault("MCP_TRANSPORT", "stdio"),
@@ -109,6 +116,7 @@ func Load() (*Config, error) {
 		OIDCClientID:               os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret:           os.Getenv("OIDC_CLIENT_SECRET"),
 		OIDCScopes:                 getEnvOrDefault("OIDC_SCOPES", "openid profile email groups"),
+		OIDCProxyCallback:          oidcProxyCallback,
 		OIDCRequestedIDTokenClaims: os.Getenv("OIDC_REQUESTED_ID_TOKEN_CLAIMS"),
 
 		EmbeddingsEnabled: embeddingsEnabled,
