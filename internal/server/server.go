@@ -136,6 +136,14 @@ func Run(cfg *config.Config, version string) error {
 		}, searcher, gw, allowed, limiter, auditor)
 	}
 
+	// 5. Resolve the OAuth proxy before announcing readiness: oidc mode reaches
+	// out to ArgoCD and to the provider, and a server that logged "ready" and
+	// then died on discovery is a confusing way to report a misconfiguration.
+	proxy, err := resolveOAuthProxy(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
 		slog.String("auth_mode", cfg.AuthMode),
@@ -147,10 +155,10 @@ func Run(cfg *config.Config, version string) error {
 		slog.Bool("tls_insecure", cfg.TLSInsecure),
 	)
 
-	// 5. Start.
+	// 6. Start.
 	switch cfg.Transport {
 	case "http":
-		return runHTTP(ctx, mcpServer, cfg, logger)
+		return runHTTP(ctx, mcpServer, cfg, proxy, logger)
 	default:
 		return runStdio(mcpServer, logger)
 	}
@@ -191,7 +199,7 @@ func runStdio(s *server.MCPServer, logger *slog.Logger) error {
 	return server.ServeStdio(s)
 }
 
-func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error {
+func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, proxy *oauthProxy, logger *slog.Logger) error {
 	httpSrv := server.NewStreamableHTTPServer(s,
 		server.WithStateLess(true),
 		server.WithEndpointPath("/mcp"),
@@ -206,14 +214,9 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 		w.WriteHeader(http.StatusOK)
 	})
 
-	switch cfg.AuthMode {
-	case "oauth":
-		mountOAuth(mux, httpSrv, cfg, logger)
-	case "oidc":
-		if err := mountOIDC(ctx, mux, httpSrv, cfg, logger); err != nil {
-			return fmt.Errorf("oidc setup: %w", err)
-		}
-	default:
+	if proxy != nil {
+		mountOAuthProxy(mux, httpSrv, cfg, logger, proxy)
+	} else {
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
 	}
@@ -246,64 +249,79 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 	}
 }
 
-func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) {
-	dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
-
-	mountOAuthProxy(mux, httpSrv, cfg, logger, auth.AuthorizeOptions{
-		AuthorizationEndpoint: dexBase + "/auth",
-		ClientID:              cfg.DexClientID,
-		Scopes:                auth.DexScopes,
-	}, auth.TokenOptions{
-		TokenEndpoint: dexBase + "/token",
-		ClientID:      cfg.DexClientID,
-	})
-
-	logger.Info("OAuth mode enabled",
-		slog.String("dex_issuer", dexBase),
-		slog.String("client_id", cfg.DexClientID),
-	)
+// oauthProxy holds the resolved provider endpoints the /authorize and /token
+// proxies use. nil means token mode: no OAuth surface at all.
+type oauthProxy struct {
+	authorize auth.AuthorizeOptions
+	token     auth.TokenOptions
 }
 
-// mountOIDC wires the OAuth proxy against the external provider ArgoCD trusts
-// through oidc.config, for the ArgoCD instances that run no Dex at all.
-func mountOIDC(ctx context.Context, mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) error {
-	client := &http.Client{Timeout: 15 * time.Second}
+// resolveOAuthProxy works out which provider to proxy to, reaching out to
+// ArgoCD and the provider in oidc mode. Called before the server reports ready
+// so a misconfiguration surfaces as a startup failure.
+func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*oauthProxy, error) {
+	switch cfg.AuthMode {
+	case "oauth":
+		dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
+		logger.Info("OAuth mode enabled",
+			slog.String("dex_issuer", dexBase),
+			slog.String("client_id", cfg.DexClientID),
+		)
+		return &oauthProxy{
+			authorize: auth.AuthorizeOptions{
+				AuthorizationEndpoint: dexBase + "/auth",
+				ClientID:              cfg.DexClientID,
+				Scopes:                auth.DexScopes,
+			},
+			token: auth.TokenOptions{
+				TokenEndpoint: dexBase + "/token",
+				ClientID:      cfg.DexClientID,
+			},
+		}, nil
 
-	issuer, clientID := cfg.OIDCIssuer, cfg.OIDCClientID
-	if issuer == "" {
-		settings, err := auth.DiscoverArgoCDOIDC(ctx, client, cfg.ArgoCDBaseURL)
-		if err != nil {
-			return fmt.Errorf("read OIDC settings from ArgoCD: %w", err)
+	case "oidc":
+		client := &http.Client{Timeout: 15 * time.Second}
+
+		issuer, clientID := cfg.OIDCIssuer, cfg.OIDCClientID
+		if issuer == "" {
+			settings, err := auth.DiscoverArgoCDOIDC(ctx, client, cfg.ArgoCDBaseURL)
+			if err != nil {
+				return nil, fmt.Errorf("oidc setup: read OIDC settings from ArgoCD: %w", err)
+			}
+			issuer, clientID = settings.Issuer, settings.ClientID
+			logger.Info("discovered OIDC provider from ArgoCD",
+				slog.String("issuer", issuer),
+				slog.String("client_id", clientID),
+			)
 		}
-		issuer, clientID = settings.Issuer, settings.ClientID
-		logger.Info("discovered OIDC provider from ArgoCD",
+
+		endpoints, err := auth.DiscoverProvider(ctx, client, issuer)
+		if err != nil {
+			return nil, fmt.Errorf("oidc setup: discover provider %s: %w", issuer, err)
+		}
+
+		logger.Info("OIDC mode enabled",
 			slog.String("issuer", issuer),
 			slog.String("client_id", clientID),
+			slog.Bool("confidential_client", cfg.OIDCClientSecret != ""),
 		)
+		return &oauthProxy{
+			authorize: auth.AuthorizeOptions{
+				AuthorizationEndpoint:  endpoints.AuthorizationEndpoint,
+				ClientID:               clientID,
+				Scopes:                 cfg.OIDCScopes,
+				RequestedIDTokenClaims: cfg.OIDCRequestedIDTokenClaims,
+			},
+			token: auth.TokenOptions{
+				TokenEndpoint: endpoints.TokenEndpoint,
+				ClientID:      clientID,
+				ClientSecret:  cfg.OIDCClientSecret,
+			},
+		}, nil
+
+	default:
+		return nil, nil
 	}
-
-	endpoints, err := auth.DiscoverProvider(ctx, client, issuer)
-	if err != nil {
-		return fmt.Errorf("discover provider %s: %w", issuer, err)
-	}
-
-	mountOAuthProxy(mux, httpSrv, cfg, logger, auth.AuthorizeOptions{
-		AuthorizationEndpoint:  endpoints.AuthorizationEndpoint,
-		ClientID:               clientID,
-		Scopes:                 cfg.OIDCScopes,
-		RequestedIDTokenClaims: cfg.OIDCRequestedIDTokenClaims,
-	}, auth.TokenOptions{
-		TokenEndpoint: endpoints.TokenEndpoint,
-		ClientID:      clientID,
-		ClientSecret:  cfg.OIDCClientSecret,
-	})
-
-	logger.Info("OIDC mode enabled",
-		slog.String("issuer", issuer),
-		slog.String("client_id", clientID),
-		slog.Bool("confidential_client", cfg.OIDCClientSecret != ""),
-	)
-	return nil
 }
 
 func mountOAuthProxy(
@@ -311,9 +329,9 @@ func mountOAuthProxy(
 	httpSrv http.Handler,
 	cfg *config.Config,
 	logger *slog.Logger,
-	authorize auth.AuthorizeOptions,
-	token auth.TokenOptions,
+	proxy *oauthProxy,
 ) {
+	authorize, token := proxy.authorize, proxy.token
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
