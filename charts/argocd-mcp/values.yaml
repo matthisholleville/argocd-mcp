@@ -33,12 +33,33 @@ argocd:
 
 # -- Authentication settings
 auth:
-  # -- Auth mode: "token" (static) or "oauth" (Dex SSO per-user RBAC)
+  # -- Auth mode: "token" (static), "oauth" (ArgoCD's bundled Dex, per-user
+  # RBAC) or "oidc" (the external provider ArgoCD trusts through oidc.config,
+  # per-user RBAC, for ArgoCD instances that run no Dex)
   mode: token
   # -- Dex client ID (only used when mode=oauth)
   dexClientID: argo-cd-cli
-  # -- Public URL of the MCP server (only used when mode=oauth)
+  # -- Public URL of the MCP server (used when mode=oauth or mode=oidc)
   serverBaseURL: ""
+  # -- External OIDC provider (only used when mode=oidc)
+  oidc:
+    # -- Issuer URL. Empty reads it from ArgoCD's own oidc.config
+    issuer: ""
+    # -- Client ID. Must be an audience ArgoCD accepts (its oidc.config
+    # clientID or cliClientID). Empty reads it from ArgoCD's own oidc.config
+    clientID: ""
+    # -- Existing secret holding the client secret, for providers that treat
+    # the client as confidential. Leave empty for public/PKCE clients
+    existingSecret: ""
+    # -- Key inside that secret
+    existingSecretKey: client_secret
+    # -- Space-separated scopes. Empty uses the server default
+    scopes: ""
+    # -- Claims to request in the id_token, mirroring ArgoCD's
+    # requestedIDTokenClaims. Needed when the provider only emits a claim on
+    # request, e.g. groups for ArgoCD RBAC:
+    # requestedIDTokenClaims: {groups: {essential: true}}
+    requestedIDTokenClaims: {}
 
 # -- MCP server settings
 mcp:

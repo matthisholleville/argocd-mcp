@@ -13,6 +13,7 @@
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#how-it-works">How It Works</a> &bull;
   <a href="#oauth-via-argocd-dex-per-user-rbac">OAuth</a> &bull;
+  <a href="#oauth-via-an-external-oidc-provider-no-dex">OIDC</a> &bull;
   <a href="#configuration">Configuration</a>
 </p>
 
@@ -26,7 +27,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - **Two tool modes**: `search` (2 meta-tools) or `generated` (1 typed tool per endpoint)
 - Works with **Claude Desktop, Claude Code, Cursor**, or any MCP client
 - **No code per endpoint** — the OpenAPI spec is the source of truth
-- **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
+- **Three auth modes**: static token, OAuth via ArgoCD Dex, or OAuth via the external OIDC provider ArgoCD trusts (both give per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
 - **Resource scoping** — restrict which ArgoCD resources are exposed with `ALLOWED_RESOURCES`
 - **Rate limiting** — per-user token bucket to protect ArgoCD from excessive calls
@@ -198,6 +199,65 @@ ArgoCD auto-registers `argo-cd-cli` at startup and prepends it to the client lis
 - The Dex `id_token` (with `aud: argo-cd-cli`) is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
 - ArgoCD validates the token against Dex's JWKS and applies **per-user RBAC**
 - Each user only sees the applications and resources they have access to
+
+</details>
+
+---
+
+### OAuth via an external OIDC provider (no Dex)
+
+For the ArgoCD instances configured with `oidc.config` rather than `dex.config`: ArgoCD talks to the identity provider directly and runs no Dex, so `/api/dex/*` answers nothing and `AUTH_MODE=oauth` cannot complete a flow. `AUTH_MODE=oidc` proxies to that same provider instead, and per-user RBAC works exactly as in Dex mode.
+
+The two settings are mutually exclusive in ArgoCD (`oidc.config` wins and Dex is never served), so pick the mode that matches your instance:
+
+| ArgoCD has | Mode | Provider |
+|---|---|---|
+| `dex.config` | `oauth` | ArgoCD's bundled Dex |
+| `oidc.config` | `oidc` | your IdP, directly |
+
+```bash
+docker run -p 8080:8080 \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e MCP_TRANSPORT=http \
+  -e AUTH_MODE=oidc \
+  -e SERVER_BASE_URL=http://localhost:8080 \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+No issuer or client id is needed: the server reads ArgoCD's own `/api/v1/settings` at startup and uses the provider it declares, preferring `cliClientID` over `clientID` when both are set. Override with `OIDC_ISSUER` + `OIDC_CLIENT_ID` (both together) to point at something else. Client connection is identical to Dex mode.
+
+<details>
+<summary><strong>Required: identity provider configuration</strong></summary>
+
+<br/>
+
+**The client id must be an audience ArgoCD accepts.** ArgoCD validates the `aud` of the incoming `id_token` against its `oidc.config` `clientID` / `cliClientID`. A token minted for any other client is rejected with `failed to verify the token`, which is why the server defaults to the client ArgoCD itself advertises.
+
+**Register the MCP client callbacks as redirect URIs** on that application:
+
+| Redirect URI | Used by |
+|---|---|
+| `http://localhost:9382/callback` | Claude Code (`--callback-port 9382`) |
+| `https://claude.ai/api/mcp/auth_callback` | Claude Desktop |
+
+Unlike Dex, which accepts any loopback redirect for a public client, most providers require exact registration.
+
+**Confidential clients:** if the application ArgoCD points at requires a client secret (most web-application types do), pass it as `OIDC_CLIENT_SECRET`. It is added server-side on the token exchange, so MCP clients still register as public and never see it. Public/PKCE clients (e.g. an application registered specifically for CLI use and referenced by ArgoCD as `cliClientID`) need no secret.
+
+**Groups for RBAC:** ArgoCD requests the groups claim through its own `requestedIDTokenClaims`. Providers that only emit a claim on request need the same from this server, otherwise every user lands on `policy.default`:
+
+```bash
+-e OIDC_REQUESTED_ID_TOKEN_CLAIMS='{"id_token":{"groups":{"essential":true}}}'
+```
+
+Scopes default to `openid profile email groups` and are overridable with `OIDC_SCOPES`; providers disagree on which they accept (`offline_access` in particular).
+
+**How it works under the hood:**
+
+- The MCP server acts as an OAuth proxy to the provider, discovered via `{issuer}/.well-known/openid-configuration`
+- The provider's `id_token` is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
+- ArgoCD validates it against the provider's JWKS and applies **per-user RBAC**
+- Startup fails loudly when ArgoCD advertises a Dex configuration instead, pointing at `AUTH_MODE=oauth`
 
 </details>
 
@@ -399,9 +459,14 @@ Set `AUDIT_LOG=false` to disable.
 |----------|----------|---------|-------------|
 | `ARGOCD_BASE_URL` | Yes | | ArgoCD server URL |
 | `ARGOCD_TOKEN` | When `AUTH_MODE=token` | | ArgoCD API token |
-| `AUTH_MODE` | No | `token` | `token` (static) or `oauth` (Dex SSO) |
+| `AUTH_MODE` | No | `token` | `token` (static), `oauth` (ArgoCD's Dex) or `oidc` (external provider, no Dex) |
 | `DEX_CLIENT_ID` | When `AUTH_MODE=oauth` | `argo-cd-cli` | Dex client ID |
-| `SERVER_BASE_URL` | When `AUTH_MODE=oauth` | `http://localhost:8080` | Public URL of this server |
+| `SERVER_BASE_URL` | When `AUTH_MODE=oauth` or `oidc` | `http://localhost:8080` | Public URL of this server |
+| `OIDC_ISSUER` | No | read from ArgoCD | Provider issuer URL. Set together with `OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_ID` | No | read from ArgoCD | Client ID. Must be an audience ArgoCD accepts |
+| `OIDC_CLIENT_SECRET` | For confidential clients | | Added server-side on the token exchange |
+| `OIDC_SCOPES` | No | `openid profile email groups` | Space-separated scopes |
+| `OIDC_REQUESTED_ID_TOKEN_CLAIMS` | No | | JSON `claims` request parameter, e.g. `{"id_token":{"groups":{"essential":true}}}` |
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |

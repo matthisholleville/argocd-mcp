@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -20,14 +21,32 @@ type Config struct {
 	ArgoCDToken string
 	// SpecURL overrides the default spec URL ({base}/swagger.json).
 	SpecURL string
-	// AuthMode is "token" (static token, default) or "oauth" (Dex SSO).
+	// AuthMode is "token" (static token, default), "oauth" (ArgoCD's bundled
+	// Dex) or "oidc" (the external provider ArgoCD trusts through oidc.config).
 	AuthMode string
 	// ServerBaseURL is the public URL of this server (for OAuth metadata).
-	// Only used when AuthMode == "oauth". Defaults to http://localhost:{port}.
+	// Unused when AuthMode == "token". Defaults to http://localhost:{port}.
 	ServerBaseURL string
 	// DexClientID is the Dex static client ID. Must be registered in ArgoCD's
 	// dex.config with the correct redirect_uris. Defaults to "argo-cd-cli".
 	DexClientID string
+	// OIDCIssuer is the issuer URL of the provider, used for endpoint
+	// discovery. Empty means: read it from ArgoCD's own oidc.config.
+	OIDCIssuer string
+	// OIDCClientID is the client the MCP authenticates users with. Its id must
+	// be an audience ArgoCD accepts (its oidc.config clientID or cliClientID),
+	// otherwise ArgoCD rejects the resulting token. Empty means: read it from
+	// ArgoCD's own oidc.config.
+	OIDCClientID string
+	// OIDCClientSecret authenticates the token exchange when the provider
+	// treats the client as confidential. Empty for public/PKCE clients.
+	OIDCClientSecret string
+	// OIDCScopes are the scopes requested in oidc mode.
+	OIDCScopes string
+	// OIDCRequestedIDTokenClaims is raw JSON forwarded as the OIDC `claims`
+	// request parameter, mirroring ArgoCD's requestedIDTokenClaims. Needed when
+	// the provider only emits a claim on request, e.g. groups for ArgoCD RBAC.
+	OIDCRequestedIDTokenClaims string
 	// Embeddings enables semantic vector search via Ollama.
 	// When false, falls back to keyword search.
 	EmbeddingsEnabled bool
@@ -77,14 +96,21 @@ func Load() (*Config, error) {
 	errs = appendIfErr(errs, err)
 
 	cfg := &Config{
-		Transport:         getEnvOrDefault("MCP_TRANSPORT", "stdio"),
-		Addr:              getEnvOrDefault("MCP_ADDR", ":8080"),
-		ArgoCDBaseURL:     os.Getenv("ARGOCD_BASE_URL"),
-		ArgoCDToken:       os.Getenv("ARGOCD_TOKEN"),
-		SpecURL:           os.Getenv("ARGOCD_SPEC_URL"),
-		AuthMode:          getEnvOrDefault("AUTH_MODE", "token"),
-		ServerBaseURL:     os.Getenv("SERVER_BASE_URL"),
-		DexClientID:       getEnvOrDefault("DEX_CLIENT_ID", "argo-cd-cli"),
+		Transport:     getEnvOrDefault("MCP_TRANSPORT", "stdio"),
+		Addr:          getEnvOrDefault("MCP_ADDR", ":8080"),
+		ArgoCDBaseURL: os.Getenv("ARGOCD_BASE_URL"),
+		ArgoCDToken:   os.Getenv("ARGOCD_TOKEN"),
+		SpecURL:       os.Getenv("ARGOCD_SPEC_URL"),
+		AuthMode:      getEnvOrDefault("AUTH_MODE", "token"),
+		ServerBaseURL: os.Getenv("SERVER_BASE_URL"),
+		DexClientID:   getEnvOrDefault("DEX_CLIENT_ID", "argo-cd-cli"),
+
+		OIDCIssuer:                 os.Getenv("OIDC_ISSUER"),
+		OIDCClientID:               os.Getenv("OIDC_CLIENT_ID"),
+		OIDCClientSecret:           os.Getenv("OIDC_CLIENT_SECRET"),
+		OIDCScopes:                 getEnvOrDefault("OIDC_SCOPES", "openid profile email groups"),
+		OIDCRequestedIDTokenClaims: os.Getenv("OIDC_REQUESTED_ID_TOKEN_CLAIMS"),
+
 		EmbeddingsEnabled: embeddingsEnabled,
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
@@ -100,8 +126,8 @@ func Load() (*Config, error) {
 	if cfg.ArgoCDBaseURL == "" {
 		errs = append(errs, "ARGOCD_BASE_URL is required")
 	}
-	if cfg.AuthMode != "token" && cfg.AuthMode != "oauth" {
-		errs = append(errs, fmt.Sprintf("AUTH_MODE must be 'token' or 'oauth', got %q", cfg.AuthMode))
+	if cfg.AuthMode != "token" && cfg.AuthMode != "oauth" && cfg.AuthMode != "oidc" {
+		errs = append(errs, fmt.Sprintf("AUTH_MODE must be 'token', 'oauth' or 'oidc', got %q", cfg.AuthMode))
 	}
 	if cfg.AuthMode == "token" && cfg.ArgoCDToken == "" {
 		errs = append(errs, "ARGOCD_TOKEN is required when AUTH_MODE=token")
@@ -111,6 +137,17 @@ func Load() (*Config, error) {
 	}
 	if cfg.AuthMode == "oauth" && cfg.Transport != "http" {
 		errs = append(errs, "AUTH_MODE=oauth requires MCP_TRANSPORT=http")
+	}
+	if cfg.AuthMode == "oidc" && cfg.Transport != "http" {
+		errs = append(errs, "AUTH_MODE=oidc requires MCP_TRANSPORT=http")
+	}
+	// An issuer without a client id (or the reverse) cannot be completed from
+	// ArgoCD: discovery reads both or neither.
+	if cfg.AuthMode == "oidc" && (cfg.OIDCIssuer == "") != (cfg.OIDCClientID == "") {
+		errs = append(errs, "OIDC_ISSUER and OIDC_CLIENT_ID must be set together, or both left empty to read them from ArgoCD")
+	}
+	if cfg.OIDCRequestedIDTokenClaims != "" && !json.Valid([]byte(cfg.OIDCRequestedIDTokenClaims)) {
+		errs = append(errs, "OIDC_REQUESTED_ID_TOKEN_CLAIMS must be valid JSON")
 	}
 	if cfg.ToolMode != "search" && cfg.ToolMode != "generated" {
 		errs = append(errs, fmt.Sprintf("TOOL_MODE must be 'search' or 'generated', got %q", cfg.ToolMode))

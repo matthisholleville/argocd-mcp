@@ -206,9 +206,14 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 		w.WriteHeader(http.StatusOK)
 	})
 
-	if cfg.AuthMode == "oauth" {
+	switch cfg.AuthMode {
+	case "oauth":
 		mountOAuth(mux, httpSrv, cfg, logger)
-	} else {
+	case "oidc":
+		if err := mountOIDC(ctx, mux, httpSrv, cfg, logger); err != nil {
+			return fmt.Errorf("oidc setup: %w", err)
+		}
+	default:
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
 	}
@@ -244,20 +249,80 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) {
 	dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
 
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
-	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID, logger))
-	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(dexBase+"/auth", cfg.DexClientID))
-	mux.HandleFunc("POST /token", auth.HandleToken(dexBase+"/token", cfg.DexClientID))
-
-	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
-	mux.Handle("/mcp", authMiddleware(httpSrv))
+	mountOAuthProxy(mux, httpSrv, cfg, logger, auth.AuthorizeOptions{
+		AuthorizationEndpoint: dexBase + "/auth",
+		ClientID:              cfg.DexClientID,
+		Scopes:                auth.DexScopes,
+	}, auth.TokenOptions{
+		TokenEndpoint: dexBase + "/token",
+		ClientID:      cfg.DexClientID,
+	})
 
 	logger.Info("OAuth mode enabled",
 		slog.String("dex_issuer", dexBase),
 		slog.String("client_id", cfg.DexClientID),
 	)
+}
+
+// mountOIDC wires the OAuth proxy against the external provider ArgoCD trusts
+// through oidc.config, for the ArgoCD instances that run no Dex at all.
+func mountOIDC(ctx context.Context, mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	issuer, clientID := cfg.OIDCIssuer, cfg.OIDCClientID
+	if issuer == "" {
+		settings, err := auth.DiscoverArgoCDOIDC(ctx, client, cfg.ArgoCDBaseURL)
+		if err != nil {
+			return fmt.Errorf("read OIDC settings from ArgoCD: %w", err)
+		}
+		issuer, clientID = settings.Issuer, settings.ClientID
+		logger.Info("discovered OIDC provider from ArgoCD",
+			slog.String("issuer", issuer),
+			slog.String("client_id", clientID),
+		)
+	}
+
+	endpoints, err := auth.DiscoverProvider(ctx, client, issuer)
+	if err != nil {
+		return fmt.Errorf("discover provider %s: %w", issuer, err)
+	}
+
+	mountOAuthProxy(mux, httpSrv, cfg, logger, auth.AuthorizeOptions{
+		AuthorizationEndpoint:  endpoints.AuthorizationEndpoint,
+		ClientID:               clientID,
+		Scopes:                 cfg.OIDCScopes,
+		RequestedIDTokenClaims: cfg.OIDCRequestedIDTokenClaims,
+	}, auth.TokenOptions{
+		TokenEndpoint: endpoints.TokenEndpoint,
+		ClientID:      clientID,
+		ClientSecret:  cfg.OIDCClientSecret,
+	})
+
+	logger.Info("OIDC mode enabled",
+		slog.String("issuer", issuer),
+		slog.String("client_id", clientID),
+		slog.Bool("confidential_client", cfg.OIDCClientSecret != ""),
+	)
+	return nil
+}
+
+func mountOAuthProxy(
+	mux *http.ServeMux,
+	httpSrv http.Handler,
+	cfg *config.Config,
+	logger *slog.Logger,
+	authorize auth.AuthorizeOptions,
+	token auth.TokenOptions,
+) {
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
+	mux.HandleFunc("POST /register", auth.HandleRegister(authorize.ClientID, logger))
+	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(authorize))
+	mux.HandleFunc("POST /token", auth.HandleToken(token))
+
+	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
+	mux.Handle("/mcp", authMiddleware(httpSrv))
 }
 
 func buildHooks(logger *slog.Logger) *server.Hooks {
