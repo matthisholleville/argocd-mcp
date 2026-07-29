@@ -241,7 +241,9 @@ No issuer or client id is needed: the server reads ArgoCD's own `/api/v1/setting
 
 MCP clients bind a loopback port that cannot be pre-registered. Dex accepts any loopback redirect for a public client (RFC 8252), which is why `oauth` mode needs no such handling, but most providers require an exact match and would reject it.
 
-So in `oidc` mode this server is the registered redirect target: it carries the client's `redirect_uri` and `state` through the upstream `state` parameter (HMAC-signed with a per-process key, so a caller cannot point the authorization code somewhere else), then relays the code back to whichever loopback the client bound. Client callbacks need no registration at all, and neither does `https://claude.ai/api/mcp/auth_callback`.
+So in `oidc` mode this server is the registered redirect target: it carries the client's `redirect_uri` and `state` through the upstream `state` parameter (HMAC-signed, so neither can be tampered with in the browser), then relays the code back to whichever loopback the client bound. Client callbacks need no registration at all.
+
+Because the provider now only ever sees this server's callback, its own redirect-URI allowlist no longer constrains where an authorization code can end up, and this server has to do that itself. It accepts loopback redirects (RFC 8252, what MCP clients bind) and rejects everything else; a client that calls back to a fixed public URL, e.g. `https://claude.ai/api/mcp/auth_callback` for the hosted claude.ai integration, has to be listed in `OIDC_ALLOWED_REDIRECT_URIS`. Signing alone would not be enough: the signature proves this server minted the state, not that the target is safe.
 
 Set `OIDC_PROXY_CALLBACK=false` to pass the client's `redirect_uri` straight through instead, for a provider that tolerates loopback redirects. Each client callback then has to be registered.
 
@@ -472,6 +474,8 @@ Set `AUDIT_LOG=false` to disable.
 | `OIDC_SCOPES` | No | `openid profile email groups` | Space-separated scopes |
 | `OIDC_PROXY_CALLBACK` | No | `true` | Register `{SERVER_BASE_URL}/oauth/callback` at the provider and relay codes to clients, instead of registering each client callback |
 | `OIDC_REQUESTED_ID_TOKEN_CLAIMS` | No | | JSON `claims` request parameter, e.g. `{"id_token":{"groups":{"essential":true}}}` |
+| `OIDC_ALLOWED_REDIRECT_URIS` | No | | Comma-separated non-loopback client `redirect_uri` values to accept. Loopback is always accepted; anything else is rejected |
+| `OIDC_STATE_KEY` | With >1 replica | | Shared secret (min 32 chars) the callback state is signed with. Unset generates a per-process key, which only works with a single replica |
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |

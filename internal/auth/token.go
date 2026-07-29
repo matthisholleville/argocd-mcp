@@ -3,9 +3,9 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 )
@@ -25,6 +25,11 @@ type TokenOptions struct {
 	// when /authorize substituted this server's callback, because the provider
 	// checks that the code is redeemed against the redirect it was issued for.
 	RedirectURI string
+	// RequireIDToken fails the exchange when the provider returned no id_token.
+	// The whole point of this proxy is the id_token-for-access_token swap, so in
+	// oidc mode its absence is an upstream failure, not something to hand the
+	// client an opaque token for and let it 401 on every ArgoCD call.
+	RequireIDToken bool
 }
 
 // HandleToken serves POST /token.
@@ -93,13 +98,28 @@ func HandleToken(opts TokenOptions) http.HandlerFunc {
 		// ArgoCD validates the id_token JWT, not the opaque access_token.
 		var tokenResp map[string]any
 		if err := json.Unmarshal(body, &tokenResp); err != nil {
+			if opts.RequireIDToken {
+				writeJSON(w, http.StatusBadGateway, map[string]string{
+					"error":             "upstream_error",
+					"error_description": "provider token response is not JSON, so it carries no id_token to authenticate against ArgoCD",
+				})
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(body)
 			return
 		}
 
-		if idToken, ok := tokenResp["id_token"].(string); ok && idToken != "" {
+		idToken, _ := tokenResp["id_token"].(string)
+		if idToken == "" && opts.RequireIDToken {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "upstream_error",
+				"error_description": "provider returned no id_token; check that the requested scopes include openid",
+			})
+			return
+		}
+		if idToken != "" {
 			tokenResp["access_token"] = idToken
 			tokenResp["token_type"] = "Bearer"
 		}

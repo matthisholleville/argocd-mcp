@@ -13,8 +13,12 @@ import (
 // StateCodec carries a client's redirect_uri and state through the upstream
 // provider's state parameter, so the provider only ever sees this server's
 // callback. Contents are signed, not encrypted: the provider and the browser
-// both see them, and the signature is what stops a caller from injecting an
-// arbitrary redirect target.
+// both see them.
+//
+// The signature proves only that this server minted the value, i.e. that the
+// state was not forged or tampered with in the browser. It says nothing about
+// whether the redirect target is safe, since /authorize would happily sign a
+// target an attacker asked for: ValidateClientRedirect is what decides that.
 type StateCodec struct {
 	key []byte
 }
@@ -26,14 +30,28 @@ type statePayload struct {
 }
 
 // NewStateCodec generates a per-process signing key. Logins in flight across a
-// restart fail closed and the client retries, which is preferable to persisting
-// a key or sharing one between replicas.
+// restart fail closed and the client retries.
+//
+// A generated key only works for a single replica: /authorize and the browser's
+// later call to /oauth/callback are separate requests that any replica can
+// serve, and a replica that did not mint the state cannot verify it. Use
+// NewStateCodecWithKey (OIDC_STATE_KEY) to run more than one.
 func NewStateCodec() (*StateCodec, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate state signing key: %w", err)
 	}
 	return &StateCodec{key: key}, nil
+}
+
+// NewStateCodecWithKey derives the signing key from a shared secret so every
+// replica verifies the states its peers minted.
+func NewStateCodecWithKey(secret string) (*StateCodec, error) {
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("state signing key must be at least 32 characters, got %d", len(secret))
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return &StateCodec{key: sum[:]}, nil
 }
 
 // Encode packs the client's redirect_uri and state into a signed opaque string.

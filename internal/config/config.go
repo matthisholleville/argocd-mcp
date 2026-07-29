@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -43,6 +44,9 @@ type Config struct {
 	OIDCClientSecret string
 	// OIDCScopes are the scopes requested in oidc mode.
 	OIDCScopes string
+	// OIDCScopesExplicit records that OIDC_SCOPES was set, so discovery knows it
+	// must not override the operator with ArgoCD's own requestedScopes.
+	OIDCScopesExplicit bool
 	// OIDCProxyCallback makes this server, rather than the MCP client, the
 	// redirect target registered at the provider. On by default: MCP clients
 	// bind loopback ports that cannot be pre-registered, and unlike Dex most
@@ -52,6 +56,16 @@ type Config struct {
 	// request parameter, mirroring ArgoCD's requestedIDTokenClaims. Needed when
 	// the provider only emits a claim on request, e.g. groups for ArgoCD RBAC.
 	OIDCRequestedIDTokenClaims string
+	// OIDCAllowedRedirectURIs are non-loopback client redirect_uri values this
+	// server will hand an authorization code to. Loopback is always accepted;
+	// anything else has to be listed here, because in proxy-callback mode the
+	// provider no longer validates the client's redirect_uri.
+	OIDCAllowedRedirectURIs []string
+	// OIDCStateKey is the shared secret the callback state is signed with. Empty
+	// generates a per-process key, which only works with a single replica: any
+	// replica can serve the browser's callback and only the one that minted the
+	// state can verify it.
+	OIDCStateKey string
 	// Embeddings enables semantic vector search via Ollama.
 	// When false, falls back to keyword search.
 	EmbeddingsEnabled bool
@@ -116,8 +130,11 @@ func Load() (*Config, error) {
 		OIDCClientID:               os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret:           os.Getenv("OIDC_CLIENT_SECRET"),
 		OIDCScopes:                 getEnvOrDefault("OIDC_SCOPES", "openid profile email groups"),
+		OIDCScopesExplicit:         os.Getenv("OIDC_SCOPES") != "",
 		OIDCProxyCallback:          oidcProxyCallback,
 		OIDCRequestedIDTokenClaims: os.Getenv("OIDC_REQUESTED_ID_TOKEN_CLAIMS"),
+		OIDCAllowedRedirectURIs:    parseCSV("OIDC_ALLOWED_REDIRECT_URIS"),
+		OIDCStateKey:               os.Getenv("OIDC_STATE_KEY"),
 
 		EmbeddingsEnabled: embeddingsEnabled,
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
@@ -154,8 +171,25 @@ func Load() (*Config, error) {
 	if cfg.AuthMode == "oidc" && (cfg.OIDCIssuer == "") != (cfg.OIDCClientID == "") {
 		errs = append(errs, "OIDC_ISSUER and OIDC_CLIENT_ID must be set together, or both left empty to read them from ArgoCD")
 	}
-	if cfg.OIDCRequestedIDTokenClaims != "" && !json.Valid([]byte(cfg.OIDCRequestedIDTokenClaims)) {
-		errs = append(errs, "OIDC_REQUESTED_ID_TOKEN_CLAIMS must be valid JSON")
+	// In proxy-callback mode SERVER_BASE_URL is the redirect URI registered at
+	// the provider, not just advertisement metadata, so defaulting it to
+	// localhost yields redirect_uri_mismatch on every login with nothing in our
+	// own logs to explain it.
+	if cfg.AuthMode == "oidc" && cfg.OIDCProxyCallback && cfg.ServerBaseURL == "" {
+		errs = append(errs, "SERVER_BASE_URL is required when AUTH_MODE=oidc and OIDC_PROXY_CALLBACK is enabled: it is the redirect URI registered at the provider")
+	}
+	// Without openid the provider mints no id_token, and the id_token is the
+	// only thing ArgoCD accepts as a Bearer.
+	if cfg.AuthMode == "oidc" && !slices.Contains(strings.Fields(cfg.OIDCScopes), "openid") {
+		errs = append(errs, fmt.Sprintf("OIDC_SCOPES must include 'openid', got %q", cfg.OIDCScopes))
+	}
+	if cfg.OIDCRequestedIDTokenClaims != "" {
+		// The OIDC `claims` request parameter is an object; a bare scalar or array
+		// is valid JSON that every provider rejects with invalid_request.
+		var claims map[string]any
+		if err := json.Unmarshal([]byte(cfg.OIDCRequestedIDTokenClaims), &claims); err != nil {
+			errs = append(errs, "OIDC_REQUESTED_ID_TOKEN_CLAIMS must be a JSON object, e.g. {\"id_token\":{\"groups\":{\"essential\":true}}}")
+		}
 	}
 	if cfg.ToolMode != "search" && cfg.ToolMode != "generated" {
 		errs = append(errs, fmt.Sprintf("TOOL_MODE must be 'search' or 'generated', got %q", cfg.ToolMode))

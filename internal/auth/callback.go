@@ -34,9 +34,11 @@ func HandleCallback(codec *StateCodec, logger *slog.Logger) http.HandlerFunc {
 		}
 
 		// Forward the provider's verdict as-is, success or failure: the client
-		// is the one that knows how to surface it.
+		// is the one that knows how to surface it. `iss` is deliberately not
+		// relayed: to the client, the authorization server is this server, so
+		// echoing the upstream issuer fails an RFC 9207 check.
 		forwarded := url.Values{}
-		for _, key := range []string{"code", "error", "error_description", "error_uri", "iss"} {
+		for _, key := range []string{"code", "error", "error_description", "error_uri"} {
 			if v := q.Get(key); v != "" {
 				forwarded.Set(key, v)
 			}
@@ -44,7 +46,9 @@ func HandleCallback(codec *StateCodec, logger *slog.Logger) http.HandlerFunc {
 		if clientState != "" {
 			forwarded.Set("state", clientState)
 		}
-		target.RawQuery = forwarded.Encode()
+		// Merge: the client's own redirect_uri may carry parameters it needs to
+		// correlate the callback with the request it started.
+		target.RawQuery = mergeQuery(target.Query(), forwarded).Encode()
 
 		http.Redirect(w, r, target.String(), http.StatusFound)
 	}

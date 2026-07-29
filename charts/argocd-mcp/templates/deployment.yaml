@@ -107,6 +107,19 @@ spec:
             {{- end }}
             - name: OIDC_PROXY_CALLBACK
               value: {{ .Values.auth.oidc.proxyCallback | quote }}
+            {{- with .Values.auth.oidc.allowedRedirectURIs }}
+            - name: OIDC_ALLOWED_REDIRECT_URIS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.stateKeyExistingSecret }}
+            - name: OIDC_STATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.oidc.stateKeyExistingSecret }}
+                  key: {{ .Values.auth.oidc.stateKeyExistingSecretKey }}
+            {{- else if and .Values.auth.oidc.proxyCallback (gt (int .Values.replicaCount) 1) }}
+            {{- fail "auth.oidc.stateKeyExistingSecret is required with replicaCount > 1: each replica would sign the callback state with a different key, so logins fail whenever the callback lands on another pod" }}
+            {{- end }}
             {{- with .Values.auth.oidc.requestedIDTokenClaims }}
             {{- /* Values mirror ArgoCD's requestedIDTokenClaims, i.e. the inner
                    claim set; the OIDC `claims` parameter wraps it in id_token. */}}

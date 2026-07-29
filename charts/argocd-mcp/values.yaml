@@ -53,8 +53,19 @@ auth:
     existingSecret: ""
     # -- Key inside that secret
     existingSecretKey: client_secret
-    # -- Space-separated scopes. Empty uses the server default
+    # -- Space-separated scopes. Empty reads ArgoCD's own requestedScopes, and
+    # falls back to the server default when ArgoCD declares none
     scopes: ""
+    # -- Non-loopback client redirect_uri values to accept. Loopback is always
+    # accepted; in proxy-callback mode the provider no longer validates the
+    # client's redirect_uri, so anything else must be listed here
+    allowedRedirectURIs: []
+    # -- Existing secret holding the shared key the callback state is signed
+    # with. REQUIRED with more than one replica: any replica can serve the
+    # browser's callback and only the one that minted the state can verify it
+    stateKeyExistingSecret: ""
+    # -- Key inside that secret
+    stateKeyExistingSecretKey: state_key
     # -- Let this server, rather than each MCP client, be the redirect target
     # registered at the provider. Keep on unless the provider accepts arbitrary
     # loopback redirects the way Dex does: register

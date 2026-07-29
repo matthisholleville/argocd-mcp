@@ -10,6 +10,10 @@ import (
 
 func testClient() *http.Client { return &http.Client{} }
 
+// issuerOf rebuilds the URL the test server is reachable at, so fixtures can
+// declare the issuer the discovery document is required to match.
+func issuerOf(r *http.Request) string { return "http://" + r.Host }
+
 // --- DiscoverProvider tests ---
 
 func TestDiscoverProvider_ReadsEndpoints(t *testing.T) {
@@ -19,6 +23,7 @@ func TestDiscoverProvider_ReadsEndpoints(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
+			"issuer": "` + issuerOf(r) + `",
 			"authorization_endpoint": "https://idp.example.com/oauth2/v1/authorize",
 			"token_endpoint": "https://idp.example.com/oauth2/v1/token"
 		}`))
@@ -43,7 +48,7 @@ func TestDiscoverProvider_TrimsTrailingSlash(t *testing.T) {
 	var gotPath string
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"authorization_endpoint":"https://a","token_endpoint":"https://t"}`))
+		_, _ = w.Write([]byte(`{"issuer":"` + issuerOf(r) + `","authorization_endpoint":"https://a","token_endpoint":"https://t"}`))
 	}))
 	defer provider.Close()
 

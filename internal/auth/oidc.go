@@ -14,6 +14,7 @@ const maxDiscoveryResponseSize = 1 << 20 // 1 MB
 
 // ProviderEndpoints holds the OAuth endpoints of an OIDC provider.
 type ProviderEndpoints struct {
+	Issuer                string `json:"issuer"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 }
@@ -54,6 +55,14 @@ func DiscoverProvider(ctx context.Context, client *http.Client, issuer string) (
 		return endpoints, fmt.Errorf("discovery document at %s advertises no authorization_endpoint or token_endpoint", discoveryURL)
 	}
 
+	// OpenID Connect Discovery 1.0 §4.3: the document's issuer must equal the
+	// issuer that was asked for. Without this check, a redirect or a tampered
+	// issuer silently swaps in another origin's authorize and token endpoints.
+	if endpoints.Issuer != strings.TrimRight(issuer, "/") && endpoints.Issuer != issuer {
+		return endpoints, fmt.Errorf("discovery document at %s declares issuer %q, expected %q",
+			discoveryURL, endpoints.Issuer, issuer)
+	}
+
 	return endpoints, nil
 }
 
@@ -63,13 +72,18 @@ type ArgoCDOIDCSettings struct {
 	// ClientID is cliClientID when ArgoCD declares one, since that client is
 	// the one meant for non-browser callers, and clientID otherwise.
 	ClientID string
+	// Scopes is ArgoCD's requestedScopes. Providers differ on what exists at all
+	// (neither Entra ID nor Google Workspace has a `groups` scope), so asking for
+	// anything other than what ArgoCD asks for risks invalid_scope on every login.
+	Scopes []string
 }
 
 type argocdSettings struct {
 	OIDCConfig *struct {
-		Issuer      string `json:"issuer"`
-		ClientID    string `json:"clientID"`
-		CLIClientID string `json:"cliClientID"`
+		Issuer          string   `json:"issuer"`
+		ClientID        string   `json:"clientID"`
+		CLIClientID     string   `json:"cliClientID"`
+		RequestedScopes []string `json:"requestedScopes"`
 	} `json:"oidcConfig"`
 	DexConfig *struct {
 		Connectors []struct {
@@ -123,6 +137,7 @@ func DiscoverArgoCDOIDC(ctx context.Context, client *http.Client, argoCDBaseURL 
 	}
 
 	out.Issuer = settings.OIDCConfig.Issuer
+	out.Scopes = settings.OIDCConfig.RequestedScopes
 	out.ClientID = settings.OIDCConfig.CLIClientID
 	if out.ClientID == "" {
 		out.ClientID = settings.OIDCConfig.ClientID

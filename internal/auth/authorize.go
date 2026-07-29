@@ -31,6 +31,10 @@ type AuthorizeOptions struct {
 	CallbackURL string
 	// StateCodec is required when CallbackURL is set.
 	StateCodec *StateCodec
+	// AllowedClientRedirects are non-loopback redirect_uri values accepted in
+	// addition to loopback. See ValidateClientRedirect: substituting our own
+	// callback removes the provider's redirect check, so we have to do it.
+	AllowedClientRedirects []string
 }
 
 // HandleAuthorize serves GET /authorize.
@@ -50,6 +54,10 @@ func HandleAuthorize(opts AuthorizeOptions) http.HandlerFunc {
 				http.Error(w, "redirect_uri is required", http.StatusBadRequest)
 				return
 			}
+			if err := ValidateClientRedirect(clientRedirect, opts.AllowedClientRedirects); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			state, err := opts.StateCodec.Encode(clientRedirect, q.Get("state"))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
@@ -64,8 +72,19 @@ func HandleAuthorize(opts AuthorizeOptions) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		target.RawQuery = q.Encode()
+		// Merge rather than assign: providers bake parameters into the
+		// authorization_endpoint they advertise (Azure AD B2C's ?p=<policy>), and
+		// dropping them makes every login fail at the IdP.
+		target.RawQuery = mergeQuery(target.Query(), q).Encode()
 
 		http.Redirect(w, r, target.String(), http.StatusFound)
 	}
+}
+
+// mergeQuery overlays over onto base, leaving base's other parameters intact.
+func mergeQuery(base, over url.Values) url.Values {
+	for k, vals := range over {
+		base[k] = vals
+	}
+	return base
 }

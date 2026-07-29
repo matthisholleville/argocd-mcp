@@ -27,6 +27,7 @@ func TestLoad_OIDCNoExplicitProvider(t *testing.T) {
 	t.Setenv("AUTH_MODE", "oidc")
 	t.Setenv("MCP_TRANSPORT", "http")
 	t.Setenv("ARGOCD_TOKEN", "")
+	t.Setenv("SERVER_BASE_URL", "https://mcp.example.com")
 
 	cfg, err := Load()
 	if err != nil {
@@ -93,6 +94,7 @@ func TestLoad_OIDCExplicitProvider(t *testing.T) {
 	envs["OIDC_ISSUER"] = "https://idp.example.com"
 	envs["OIDC_CLIENT_ID"] = "okta-client"
 	envs["OIDC_CLIENT_SECRET"] = "s3cret"
+	envs["SERVER_BASE_URL"] = "https://mcp.example.com"
 	envs["OIDC_SCOPES"] = "openid email"
 	setEnvs(t, envs)
 
@@ -134,6 +136,7 @@ func TestLoad_OIDCValidRequestedClaims(t *testing.T) {
 	envs["AUTH_MODE"] = "oidc"
 	envs["MCP_TRANSPORT"] = "http"
 	envs["OIDC_REQUESTED_ID_TOKEN_CLAIMS"] = `{"id_token":{"groups":{"essential":true}}}`
+	envs["SERVER_BASE_URL"] = "https://mcp.example.com"
 	setEnvs(t, envs)
 
 	cfg, err := Load()
