@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.7.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.6.0...v1.7.0) (2026-07-29)
+
+
+### Features
+
+* add oidc auth mode for ArgoCD instances without Dex ([ae94414](https://github.com/matthisholleville/argocd-mcp/commit/ae94414fa02db747ca4114812f6f170eb8e692a9))
+* add oidc auth mode for ArgoCD instances without Dex ([788a8a0](https://github.com/matthisholleville/argocd-mcp/commit/788a8a0df397f70fca7ca5ea3976d46e74012f98))
+* terminate the provider callback in oidc mode ([01e3abc](https://github.com/matthisholleville/argocd-mcp/commit/01e3abce8387a68758f66b0173d2be94df260578))
+
+
+### Bug Fixes
+
+* resolve the OAuth provider before reporting ready ([fbb36cb](https://github.com/matthisholleville/argocd-mcp/commit/fbb36cb898b518f7b314bc97458a45782b881b80))
+* validate the client redirect_uri in oidc proxy-callback mode ([8cfac07](https://github.com/matthisholleville/argocd-mcp/commit/8cfac07193868802c2fd8a16a6f9ca07a2e1f3e8))
+
+
+### Documentation
+
+* align the oidc documentation with the validation changes ([093f7b9](https://github.com/matthisholleville/argocd-mcp/commit/093f7b954400de702bf55e4b91b7b0654058630f))
+
 ## [1.6.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.5.0...v1.6.0) (2026-03-30)
 
 
