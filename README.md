@@ -158,7 +158,7 @@ Then run `/mcp` inside Claude Code to authenticate via the browser.
 
 #### Claude Desktop
 
-Claude Desktop requires a publicly accessible URL (the OAuth redirect goes through `claude.ai`). Expose the server via a reverse proxy or ngrok, then set `SERVER_BASE_URL` accordingly.
+Claude Desktop requires a publicly accessible URL (the OAuth redirect goes through `claude.ai`). Expose the server via a reverse proxy or ngrok, then set `SERVER_BASE_URL` accordingly. In `oidc` mode that callback is not a loopback URL, so it also has to be allowlisted: `OIDC_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback`.
 
 Add the public URL as a remote MCP server in **Settings > Connectors** (e.g. `https://mcp.example.com/mcp`). Claude Desktop handles the OAuth flow automatically.
 
@@ -255,15 +255,18 @@ Set `OIDC_PROXY_CALLBACK=false` to pass the client's `redirect_uri` straight thr
 -e OIDC_REQUESTED_ID_TOKEN_CLAIMS='{"id_token":{"groups":{"essential":true}}}'
 ```
 
-Scopes default to `openid profile email groups` and are overridable with `OIDC_SCOPES`; providers disagree on which they accept (`offline_access` in particular).
+Scopes are taken from ArgoCD's own `requestedScopes` when they are discovered, since providers disagree on which scopes even exist (neither Entra ID nor Google Workspace has `groups`). They fall back to `openid profile email groups` when ArgoCD declares none, and `OIDC_SCOPES` overrides both. `openid` is required either way: without it the provider mints no `id_token`, so startup rejects a scope set that omits it and the token exchange fails with `502` rather than handing the client an opaque token that would 401 on every ArgoCD call.
+
+Note that no `offline_access` is requested, so there is no refresh token and clients re-authenticate when the `id_token` expires. Add it through `OIDC_SCOPES` for a provider that accepts it.
 
 **How it works under the hood:**
 
-- The MCP server acts as an OAuth proxy to the provider, discovered via `{issuer}/.well-known/openid-configuration`
-- `/oauth/callback` is the provider's redirect target, and relays the code to the client's own callback
+- The MCP server acts as an OAuth proxy to the provider, discovered via `{issuer}/.well-known/openid-configuration`, whose `issuer` must match the one requested
+- `/oauth/callback` is the provider's redirect target, and relays the code to the client's own callback, which is validated against loopback plus `OIDC_ALLOWED_REDIRECT_URIS`
 - The provider's `id_token` is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
 - ArgoCD validates it against the provider's JWKS and applies **per-user RBAC**
 - Startup fails loudly when ArgoCD advertises a Dex configuration instead, pointing at `AUTH_MODE=oauth`
+- The callback state is signed with a per-process key unless `OIDC_STATE_KEY` is set, so running more than one replica requires that shared key
 
 </details>
 
@@ -467,11 +470,11 @@ Set `AUDIT_LOG=false` to disable.
 | `ARGOCD_TOKEN` | When `AUTH_MODE=token` | | ArgoCD API token |
 | `AUTH_MODE` | No | `token` | `token` (static), `oauth` (ArgoCD's Dex) or `oidc` (external provider, no Dex) |
 | `DEX_CLIENT_ID` | When `AUTH_MODE=oauth` | `argo-cd-cli` | Dex client ID |
-| `SERVER_BASE_URL` | When `AUTH_MODE=oauth` or `oidc` | `http://localhost:8080` | Public URL of this server |
+| `SERVER_BASE_URL` | When `AUTH_MODE=oauth`, or `oidc` with `OIDC_PROXY_CALLBACK` | `http://localhost:8080` in `oauth` mode, none in `oidc` | Public URL of this server. In `oidc` proxy-callback mode it is the redirect URI registered at the provider, so it has no default and startup fails without it |
 | `OIDC_ISSUER` | No | read from ArgoCD | Provider issuer URL. Set together with `OIDC_CLIENT_ID` |
 | `OIDC_CLIENT_ID` | No | read from ArgoCD | Client ID. Must be an audience ArgoCD accepts |
 | `OIDC_CLIENT_SECRET` | For confidential clients | | Added server-side on the token exchange |
-| `OIDC_SCOPES` | No | `openid profile email groups` | Space-separated scopes |
+| `OIDC_SCOPES` | No | ArgoCD's `requestedScopes`, else `openid profile email groups` | Space-separated scopes. Must include `openid` |
 | `OIDC_PROXY_CALLBACK` | No | `true` | Register `{SERVER_BASE_URL}/oauth/callback` at the provider and relay codes to clients, instead of registering each client callback |
 | `OIDC_REQUESTED_ID_TOKEN_CLAIMS` | No | | JSON `claims` request parameter, e.g. `{"id_token":{"groups":{"essential":true}}}` |
 | `OIDC_ALLOWED_REDIRECT_URIS` | No | | Comma-separated non-loopback client `redirect_uri` values to accept. Loopback is always accepted; anything else is rejected |
