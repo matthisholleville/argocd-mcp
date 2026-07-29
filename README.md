@@ -13,6 +13,7 @@
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#how-it-works">How It Works</a> &bull;
   <a href="#oauth-via-argocd-dex-per-user-rbac">OAuth</a> &bull;
+  <a href="#oauth-via-an-external-oidc-provider-no-dex">OIDC</a> &bull;
   <a href="#configuration">Configuration</a>
 </p>
 
@@ -26,7 +27,7 @@ Most ArgoCD MCP servers hardcode a few operations: list apps, sync, get status. 
 - **Two tool modes**: `search` (2 meta-tools) or `generated` (1 typed tool per endpoint)
 - Works with **Claude Desktop, Claude Code, Cursor**, or any MCP client
 - **No code per endpoint** — the OpenAPI spec is the source of truth
-- **Two auth modes**: static token or OAuth via ArgoCD Dex (per-user RBAC)
+- **Three auth modes**: static token, OAuth via ArgoCD Dex, or OAuth via the external OIDC provider ArgoCD trusts (both give per-user RBAC)
 - **Read-only mode** — disable all write operations with a single flag
 - **Resource scoping** — restrict which ArgoCD resources are exposed with `ALLOWED_RESOURCES`
 - **Rate limiting** — per-user token bucket to protect ArgoCD from excessive calls
@@ -157,7 +158,7 @@ Then run `/mcp` inside Claude Code to authenticate via the browser.
 
 #### Claude Desktop
 
-Claude Desktop requires a publicly accessible URL (the OAuth redirect goes through `claude.ai`). Expose the server via a reverse proxy or ngrok, then set `SERVER_BASE_URL` accordingly.
+Claude Desktop requires a publicly accessible URL (the OAuth redirect goes through `claude.ai`). Expose the server via a reverse proxy or ngrok, then set `SERVER_BASE_URL` accordingly. In `oidc` mode that callback is not a loopback URL, so it also has to be allowlisted: `OIDC_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback`.
 
 Add the public URL as a remote MCP server in **Settings > Connectors** (e.g. `https://mcp.example.com/mcp`). Claude Desktop handles the OAuth flow automatically.
 
@@ -198,6 +199,74 @@ ArgoCD auto-registers `argo-cd-cli` at startup and prepends it to the client lis
 - The Dex `id_token` (with `aud: argo-cd-cli`) is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
 - ArgoCD validates the token against Dex's JWKS and applies **per-user RBAC**
 - Each user only sees the applications and resources they have access to
+
+</details>
+
+---
+
+### OAuth via an external OIDC provider (no Dex)
+
+For the ArgoCD instances configured with `oidc.config` rather than `dex.config`: ArgoCD talks to the identity provider directly and runs no Dex, so `/api/dex/*` answers nothing and `AUTH_MODE=oauth` cannot complete a flow. `AUTH_MODE=oidc` proxies to that same provider instead, and per-user RBAC works exactly as in Dex mode.
+
+The two settings are mutually exclusive in ArgoCD (`oidc.config` wins and Dex is never served), so pick the mode that matches your instance:
+
+| ArgoCD has | Mode | Provider |
+|---|---|---|
+| `dex.config` | `oauth` | ArgoCD's bundled Dex |
+| `oidc.config` | `oidc` | your IdP, directly |
+
+```bash
+docker run -p 8080:8080 \
+  -e ARGOCD_BASE_URL=https://argocd.example.com \
+  -e MCP_TRANSPORT=http \
+  -e AUTH_MODE=oidc \
+  -e SERVER_BASE_URL=http://localhost:8080 \
+  ghcr.io/matthisholleville/argocd-mcp:latest
+```
+
+No issuer or client id is needed: the server reads ArgoCD's own `/api/v1/settings` at startup and uses the provider it declares, preferring `cliClientID` over `clientID` when both are set. Override with `OIDC_ISSUER` + `OIDC_CLIENT_ID` (both together) to point at something else. Client connection is identical to Dex mode.
+
+<details>
+<summary><strong>Required: identity provider configuration</strong></summary>
+
+<br/>
+
+**The client id must be an audience ArgoCD accepts.** ArgoCD validates the `aud` of the incoming `id_token` against its `oidc.config` `clientID` / `cliClientID`. A token minted for any other client is rejected with `failed to verify the token`, which is why the server defaults to the client ArgoCD itself advertises.
+
+**Register one redirect URI** on that application:
+
+```
+{SERVER_BASE_URL}/oauth/callback
+```
+
+MCP clients bind a loopback port that cannot be pre-registered. Dex accepts any loopback redirect for a public client (RFC 8252), which is why `oauth` mode needs no such handling, but most providers require an exact match and would reject it.
+
+So in `oidc` mode this server is the registered redirect target: it carries the client's `redirect_uri` and `state` through the upstream `state` parameter (HMAC-signed, so neither can be tampered with in the browser), then relays the code back to whichever loopback the client bound. Client callbacks need no registration at all.
+
+Because the provider now only ever sees this server's callback, its own redirect-URI allowlist no longer constrains where an authorization code can end up, and this server has to do that itself. It accepts loopback redirects (RFC 8252, what MCP clients bind) and rejects everything else; a client that calls back to a fixed public URL, e.g. `https://claude.ai/api/mcp/auth_callback` for the hosted claude.ai integration, has to be listed in `OIDC_ALLOWED_REDIRECT_URIS`. Signing alone would not be enough: the signature proves this server minted the state, not that the target is safe.
+
+Set `OIDC_PROXY_CALLBACK=false` to pass the client's `redirect_uri` straight through instead, for a provider that tolerates loopback redirects. Each client callback then has to be registered.
+
+**Confidential clients:** if the application ArgoCD points at requires a client secret (most web-application types do), pass it as `OIDC_CLIENT_SECRET`. It is added server-side on the token exchange, so MCP clients still register as public and never see it. Public/PKCE clients (e.g. an application registered specifically for CLI use and referenced by ArgoCD as `cliClientID`) need no secret.
+
+**Groups for RBAC:** ArgoCD requests the groups claim through its own `requestedIDTokenClaims`. Providers that only emit a claim on request need the same from this server, otherwise every user lands on `policy.default`:
+
+```bash
+-e OIDC_REQUESTED_ID_TOKEN_CLAIMS='{"id_token":{"groups":{"essential":true}}}'
+```
+
+Scopes are taken from ArgoCD's own `requestedScopes` when they are discovered, since providers disagree on which scopes even exist (neither Entra ID nor Google Workspace has `groups`). They fall back to `openid profile email groups` when ArgoCD declares none, and `OIDC_SCOPES` overrides both. `openid` is required either way: without it the provider mints no `id_token`, so startup rejects a scope set that omits it and the token exchange fails with `502` rather than handing the client an opaque token that would 401 on every ArgoCD call.
+
+Note that no `offline_access` is requested, so there is no refresh token and clients re-authenticate when the `id_token` expires. Add it through `OIDC_SCOPES` for a provider that accepts it.
+
+**How it works under the hood:**
+
+- The MCP server acts as an OAuth proxy to the provider, discovered via `{issuer}/.well-known/openid-configuration`, whose `issuer` must match the one requested
+- `/oauth/callback` is the provider's redirect target, and relays the code to the client's own callback, which is validated against loopback plus `OIDC_ALLOWED_REDIRECT_URIS`
+- The provider's `id_token` is swapped into the `access_token` field and forwarded as Bearer to ArgoCD
+- ArgoCD validates it against the provider's JWKS and applies **per-user RBAC**
+- Startup fails loudly when ArgoCD advertises a Dex configuration instead, pointing at `AUTH_MODE=oauth`
+- The callback state is signed with a per-process key unless `OIDC_STATE_KEY` is set, so running more than one replica requires that shared key
 
 </details>
 
@@ -399,9 +468,17 @@ Set `AUDIT_LOG=false` to disable.
 |----------|----------|---------|-------------|
 | `ARGOCD_BASE_URL` | Yes | | ArgoCD server URL |
 | `ARGOCD_TOKEN` | When `AUTH_MODE=token` | | ArgoCD API token |
-| `AUTH_MODE` | No | `token` | `token` (static) or `oauth` (Dex SSO) |
+| `AUTH_MODE` | No | `token` | `token` (static), `oauth` (ArgoCD's Dex) or `oidc` (external provider, no Dex) |
 | `DEX_CLIENT_ID` | When `AUTH_MODE=oauth` | `argo-cd-cli` | Dex client ID |
-| `SERVER_BASE_URL` | When `AUTH_MODE=oauth` | `http://localhost:8080` | Public URL of this server |
+| `SERVER_BASE_URL` | When `AUTH_MODE=oauth`, or `oidc` with `OIDC_PROXY_CALLBACK` | `http://localhost:8080` in `oauth` mode, none in `oidc` | Public URL of this server. In `oidc` proxy-callback mode it is the redirect URI registered at the provider, so it has no default and startup fails without it |
+| `OIDC_ISSUER` | No | read from ArgoCD | Provider issuer URL. Set together with `OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_ID` | No | read from ArgoCD | Client ID. Must be an audience ArgoCD accepts |
+| `OIDC_CLIENT_SECRET` | For confidential clients | | Added server-side on the token exchange |
+| `OIDC_SCOPES` | No | ArgoCD's `requestedScopes`, else `openid profile email groups` | Space-separated scopes. Must include `openid` |
+| `OIDC_PROXY_CALLBACK` | No | `true` | Register `{SERVER_BASE_URL}/oauth/callback` at the provider and relay codes to clients, instead of registering each client callback |
+| `OIDC_REQUESTED_ID_TOKEN_CLAIMS` | No | | JSON `claims` request parameter, e.g. `{"id_token":{"groups":{"essential":true}}}` |
+| `OIDC_ALLOWED_REDIRECT_URIS` | No | | Comma-separated non-loopback client `redirect_uri` values to accept. Loopback is always accepted; anything else is rejected |
+| `OIDC_STATE_KEY` | With >1 replica | | Shared secret (min 32 chars) the callback state is signed with. Unset generates a per-process key, which only works with a single replica |
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |

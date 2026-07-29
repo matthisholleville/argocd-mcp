@@ -20,7 +20,7 @@ func silentLogger() *slog.Logger {
 // Client-supplied scope must be overridden with the required openid scopes.
 // Without this, a client could request narrower scopes and break the Dex flow.
 func TestHandleAuthorize_OverridesScope(t *testing.T) {
-	handler := HandleAuthorize("https://argocd.example.com/api/dex/auth", "argo-cd-cli")
+	handler := HandleAuthorize(AuthorizeOptions{AuthorizationEndpoint: "https://argocd.example.com/api/dex/auth", ClientID: "argo-cd-cli", Scopes: DexScopes})
 	req := httptest.NewRequest(http.MethodGet, "/authorize?scope=custom&state=abc", nil)
 	rec := httptest.NewRecorder()
 
@@ -51,7 +51,7 @@ func TestHandleAuthorize_OverridesScope(t *testing.T) {
 
 // Invalid dexAuthURL must return 500, not panic.
 func TestHandleAuthorize_InvalidDexURL(t *testing.T) {
-	handler := HandleAuthorize("://invalid", "argo-cd-cli")
+	handler := HandleAuthorize(AuthorizeOptions{AuthorizationEndpoint: "://invalid", ClientID: "argo-cd-cli", Scopes: DexScopes})
 	req := httptest.NewRequest(http.MethodGet, "/authorize", nil)
 	rec := httptest.NewRecorder()
 
@@ -127,7 +127,7 @@ func TestHandleToken_SwapsIdTokenToAccessToken(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -158,7 +158,7 @@ func TestHandleToken_NoIdToken_NoSwap(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -182,7 +182,7 @@ func TestHandleToken_InvalidJSON_ForwardsRawBody(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -208,7 +208,7 @@ func TestHandleToken_ForwardsClientID(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "my-client")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "my-client"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc&client_id=attacker"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -229,7 +229,7 @@ func TestHandleToken_ForwardsDexError(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(dex.URL, "argo-cd-cli")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=bad"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestHandleToken_DexUnreachable(t *testing.T) {
 	dexURL := dex.URL
 	dex.Close()
 
-	handler := HandleToken(dexURL, "argo-cd-cli")
+	handler := HandleToken(TokenOptions{TokenEndpoint: dexURL, ClientID: "argo-cd-cli"})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()

@@ -2,25 +2,27 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
-	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
+	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/matthisholleville/argocd-mcp/internal/toolgen"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 const serverName = "argocd-mcp"
@@ -136,6 +138,14 @@ func Run(cfg *config.Config, version string) error {
 		}, searcher, gw, allowed, limiter, auditor)
 	}
 
+	// 5. Resolve the OAuth proxy before announcing readiness: oidc mode reaches
+	// out to ArgoCD and to the provider, and a server that logged "ready" and
+	// then died on discovery is a confusing way to report a misconfiguration.
+	proxy, err := resolveOAuthProxy(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	logger.Info("argocd-mcp ready",
 		slog.String("transport", cfg.Transport),
 		slog.String("auth_mode", cfg.AuthMode),
@@ -147,10 +157,10 @@ func Run(cfg *config.Config, version string) error {
 		slog.Bool("tls_insecure", cfg.TLSInsecure),
 	)
 
-	// 5. Start.
+	// 6. Start.
 	switch cfg.Transport {
 	case "http":
-		return runHTTP(ctx, mcpServer, cfg, logger)
+		return runHTTP(ctx, mcpServer, cfg, proxy, logger)
 	default:
 		return runStdio(mcpServer, logger)
 	}
@@ -191,7 +201,7 @@ func runStdio(s *server.MCPServer, logger *slog.Logger) error {
 	return server.ServeStdio(s)
 }
 
-func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logger *slog.Logger) error {
+func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, proxy *oauthProxy, logger *slog.Logger) error {
 	httpSrv := server.NewStreamableHTTPServer(s,
 		server.WithStateLess(true),
 		server.WithEndpointPath("/mcp"),
@@ -206,8 +216,8 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 		w.WriteHeader(http.StatusOK)
 	})
 
-	if cfg.AuthMode == "oauth" {
-		mountOAuth(mux, httpSrv, cfg, logger)
+	if proxy != nil {
+		mountOAuthProxy(mux, httpSrv, cfg, logger, proxy)
 	} else {
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
@@ -241,23 +251,147 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, logge
 	}
 }
 
-func mountOAuth(mux *http.ServeMux, httpSrv http.Handler, cfg *config.Config, logger *slog.Logger) {
-	dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
+// oauthProxy holds the resolved provider endpoints the /authorize and /token
+// proxies use. nil means token mode: no OAuth surface at all.
+type oauthProxy struct {
+	authorize auth.AuthorizeOptions
+	token     auth.TokenOptions
+	// stateCodec is set when this server terminates the provider's callback
+	// itself; it is what /oauth/callback needs to find the client again.
+	stateCodec *auth.StateCodec
+}
 
+// resolveOAuthProxy works out which provider to proxy to, reaching out to
+// ArgoCD and the provider in oidc mode. Called before the server reports ready
+// so a misconfiguration surfaces as a startup failure.
+func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*oauthProxy, error) {
+	switch cfg.AuthMode {
+	case "oauth":
+		dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
+		logger.Info("OAuth mode enabled",
+			slog.String("dex_issuer", dexBase),
+			slog.String("client_id", cfg.DexClientID),
+		)
+		return &oauthProxy{
+			authorize: auth.AuthorizeOptions{
+				AuthorizationEndpoint: dexBase + "/auth",
+				ClientID:              cfg.DexClientID,
+				Scopes:                auth.DexScopes,
+			},
+			token: auth.TokenOptions{
+				TokenEndpoint: dexBase + "/token",
+				ClientID:      cfg.DexClientID,
+			},
+		}, nil
+
+	case "oidc":
+		// Honour ARGOCD_TLS_INSECURE like every other outbound path: discovery
+		// talks to the same ArgoCD the spec fetch already reached, so verifying
+		// here and not there only crashloops the pod.
+		client := &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.TLSInsecure}, //nolint:gosec // operator opt-in, same flag as the spec fetch
+			},
+		}
+
+		var callbackURL string
+		var stateCodec *auth.StateCodec
+		if cfg.OIDCProxyCallback {
+			var err error
+			if cfg.OIDCStateKey != "" {
+				stateCodec, err = auth.NewStateCodecWithKey(cfg.OIDCStateKey)
+			} else {
+				stateCodec, err = auth.NewStateCodec()
+				logger.Warn("OIDC_STATE_KEY is unset, signing callback state with a per-process key: " +
+					"run a single replica, or logins will fail whenever the callback lands on another pod")
+			}
+			if err != nil {
+				return nil, fmt.Errorf("oidc setup: %w", err)
+			}
+			callbackURL = strings.TrimRight(cfg.ServerBaseURL, "/") + auth.CallbackPath
+		}
+
+		issuer, clientID := cfg.OIDCIssuer, cfg.OIDCClientID
+		scopes := cfg.OIDCScopes
+		if issuer == "" {
+			settings, err := auth.DiscoverArgoCDOIDC(ctx, client, cfg.ArgoCDBaseURL)
+			if err != nil {
+				return nil, fmt.Errorf("oidc setup: read OIDC settings from ArgoCD: %w", err)
+			}
+			issuer, clientID = settings.Issuer, settings.ClientID
+			// Prefer the scopes ArgoCD itself requests: the provider may not have
+			// the ones we default to (no `groups` on Entra ID or Google Workspace),
+			// and an explicit OIDC_SCOPES still wins.
+			if !cfg.OIDCScopesExplicit && len(settings.Scopes) > 0 {
+				scopes = strings.Join(settings.Scopes, " ")
+				if !slices.Contains(settings.Scopes, "openid") {
+					scopes = "openid " + scopes
+				}
+			}
+			logger.Info("discovered OIDC provider from ArgoCD",
+				slog.String("issuer", issuer),
+				slog.String("client_id", clientID),
+				slog.String("scopes", scopes),
+			)
+		}
+
+		endpoints, err := auth.DiscoverProvider(ctx, client, issuer)
+		if err != nil {
+			return nil, fmt.Errorf("oidc setup: discover provider %s: %w", issuer, err)
+		}
+
+		logger.Info("OIDC mode enabled",
+			slog.String("issuer", issuer),
+			slog.String("client_id", clientID),
+			slog.Bool("confidential_client", cfg.OIDCClientSecret != ""),
+			slog.String("registered_redirect_uri", callbackURL),
+		)
+		return &oauthProxy{
+			authorize: auth.AuthorizeOptions{
+				AuthorizationEndpoint:  endpoints.AuthorizationEndpoint,
+				ClientID:               clientID,
+				Scopes:                 scopes,
+				RequestedIDTokenClaims: cfg.OIDCRequestedIDTokenClaims,
+				CallbackURL:            callbackURL,
+				StateCodec:             stateCodec,
+				AllowedClientRedirects: cfg.OIDCAllowedRedirectURIs,
+			},
+			token: auth.TokenOptions{
+				TokenEndpoint:  endpoints.TokenEndpoint,
+				ClientID:       clientID,
+				ClientSecret:   cfg.OIDCClientSecret,
+				RedirectURI:    callbackURL,
+				RequireIDToken: true,
+			},
+			stateCodec: stateCodec,
+		}, nil
+
+	default:
+		return nil, nil
+	}
+}
+
+func mountOAuthProxy(
+	mux *http.ServeMux,
+	httpSrv http.Handler,
+	cfg *config.Config,
+	logger *slog.Logger,
+	proxy *oauthProxy,
+) {
+	authorize, token := proxy.authorize, proxy.token
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthServerMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", auth.HandleProtectedResourceMetadata(cfg.ServerBaseURL))
-	mux.HandleFunc("POST /register", auth.HandleRegister(cfg.DexClientID, logger))
-	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(dexBase+"/auth", cfg.DexClientID))
-	mux.HandleFunc("POST /token", auth.HandleToken(dexBase+"/token", cfg.DexClientID))
+	mux.HandleFunc("POST /register", auth.HandleRegister(authorize.ClientID, logger))
+	mux.HandleFunc("GET /authorize", auth.HandleAuthorize(authorize))
+	mux.HandleFunc("POST /token", auth.HandleToken(token))
+	if proxy.stateCodec != nil {
+		mux.HandleFunc("GET "+auth.CallbackPath, auth.HandleCallback(proxy.stateCodec, logger))
+	}
 
 	authMiddleware := auth.NewPassthroughMiddleware(cfg.ServerBaseURL, logger)
 	mux.Handle("/mcp", authMiddleware(httpSrv))
-
-	logger.Info("OAuth mode enabled",
-		slog.String("dex_issuer", dexBase),
-		slog.String("client_id", cfg.DexClientID),
-	)
 }
 
 func buildHooks(logger *slog.Logger) *server.Hooks {
