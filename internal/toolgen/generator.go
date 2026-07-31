@@ -96,7 +96,7 @@ func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter,
 					Blocked: true,
 				})
 			}
-			mtx.Observe(toolName, metrics.StatusOf(true, nil), 0)
+			mtx.IncCall(toolName, metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError("rate limit exceeded: too many requests, please slow down"), nil
 		}
 
@@ -119,12 +119,14 @@ func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter,
 
 		// Validate all path placeholders were substituted.
 		if strings.Contains(path, "{") {
+			mtx.IncCall(toolName, "error")
 			return mcp.NewToolResultError(fmt.Sprintf("missing required path parameter in %q", ep.Path)), nil
 		}
 
 		// Assemble body from body properties.
 		body, bodyErr := assembleBody(req, ep.BodyProperties)
 		if bodyErr != nil {
+			mtx.IncCall(toolName, "error")
 			return mcp.NewToolResultError(fmt.Sprintf("invalid body: %v", bodyErr)), nil
 		}
 

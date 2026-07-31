@@ -36,9 +36,13 @@ func New() *Collectors {
 		),
 		ToolDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "mcp_tool_duration_seconds",
-				Help:    "Duration of MCP tool calls in seconds.",
-				Buckets: prometheus.DefBuckets,
+				Name: "mcp_tool_duration_seconds",
+				Help: "Duration of completed MCP tool calls in seconds (excludes blocked/pre-flight-rejected calls, which never reach ArgoCD).",
+				// prometheus.DefBuckets tops out at 10s, which collapses every
+				// slow-but-normal ArgoCD operation (sync, rollout) into the +Inf
+				// bucket and destroys p95/p99 resolution exactly where operators
+				// need it most. Extend the tail to 120s.
+				Buckets: append(append([]float64{}, prometheus.DefBuckets...), 30, 60, 120),
 			},
 			[]string{"tool"},
 		),
@@ -77,9 +81,25 @@ func StatusOf(blocked bool, err error) string {
 	}
 }
 
-// Observe records one tool call's outcome and duration. Safe to call on a
-// nil *Collectors (a no-op), so callers that construct metrics optionally
-// don't need a nil check at every call site.
+// IncCall records one tool call's outcome, with no duration. Use this for
+// calls that never reached ArgoCD (blocked by rate limit / DISABLE_WRITE /
+// ALLOWED_RESOURCES, or rejected during request validation): they have no
+// meaningful "duration of an ArgoCD round trip" to report, and recording a
+// synthetic 0 would pollute ToolDuration with a spike at the low end,
+// skewing p95/p99 away from real latency exactly when rejections are most
+// frequent (e.g. under heavy rate limiting). Safe to call on a nil
+// *Collectors (a no-op).
+func (c *Collectors) IncCall(tool, status string) {
+	if c == nil {
+		return
+	}
+	c.ToolCalls.WithLabelValues(tool, status).Inc()
+}
+
+// Observe records one completed tool call's outcome and duration — use this
+// only after an actual attempt against ArgoCD (successful or failed), never
+// for a call blocked/rejected before reaching it (see IncCall). Safe to call
+// on a nil *Collectors (a no-op).
 func (c *Collectors) Observe(tool, status string, duration time.Duration) {
 	if c == nil {
 		return

@@ -161,7 +161,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
-			mtx.Observe("execute_operation", metrics.StatusOf(true, nil), 0)
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"write operations are disabled: %s method is not allowed (DISABLE_WRITE=true)",
 				strings.ToUpper(method),
@@ -178,7 +178,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
-			mtx.Observe("execute_operation", metrics.StatusOf(true, nil), 0)
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"operation not allowed: %s %s is outside the permitted resource scope (ALLOWED_RESOURCES)",
 				strings.ToUpper(method), path,
@@ -194,7 +194,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
-			mtx.Observe("execute_operation", metrics.StatusOf(true, nil), 0)
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError("rate limit exceeded: too many requests, please slow down"), nil
 		}
 
@@ -203,6 +203,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 		queryParams := make(map[string]string)
 		if raw := req.GetString("query_params", ""); raw != "" {
 			if err := json.Unmarshal([]byte(raw), &queryParams); err != nil {
+				mtx.IncCall("execute_operation", "error")
 				return mcp.NewToolResultError(fmt.Sprintf("invalid query_params JSON: %v", err)), nil
 			}
 		}

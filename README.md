@@ -468,8 +468,8 @@ Prometheus metrics are exposed at `GET /metrics` whenever `MCP_TRANSPORT=http` (
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `mcp_tool_calls_total` | Counter | `tool`, `status` | Total tool calls. `status` is `ok`, `blocked` (rejected by `DISABLE_WRITE`, `ALLOWED_RESOURCES`, or `RATE_LIMIT`), or `error` |
-| `mcp_tool_duration_seconds` | Histogram | `tool` | Tool call latency, including the round trip to ArgoCD |
+| `mcp_tool_calls_total` | Counter | `tool`, `status` | Total tool calls. `status` is `ok`, `blocked` (rejected by `DISABLE_WRITE`, `ALLOWED_RESOURCES`, or `RATE_LIMIT`), or `error` (a failed call, or one rejected during request validation, e.g. a missing required parameter) |
+| `mcp_tool_duration_seconds` | Histogram | `tool` | Latency of **completed** tool calls (the round trip to ArgoCD). `blocked` and validation-rejected calls never reach ArgoCD and are intentionally excluded — they'd otherwise spike the histogram toward 0 and skew p95/p99 away from real latency, worst of all under heavy rate limiting. Bucketed up to 120s so slow operations (sync, rollout) don't collapse into `+Inf` |
 
 `tool` is `search_operations` / `execute_operation` in the default search mode, or the generated tool name (e.g. `argocd_application_sync`) in `TOOL_MODE=generated`.
 

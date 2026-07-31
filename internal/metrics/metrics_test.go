@@ -66,6 +66,31 @@ func TestObserve_IncrementsCountersAndDuration(t *testing.T) {
 	}
 }
 
+func TestIncCall_CountsWithoutRecordingDuration(t *testing.T) {
+	c := New()
+
+	c.IncCall("execute_operation", "blocked")
+	c.IncCall("execute_operation", "blocked")
+
+	if got := counterValue(t, c.ToolCalls, prometheus.Labels{"tool": "execute_operation", "status": "blocked"}); got != 2 {
+		t.Errorf("blocked count = %v, want 2", got)
+	}
+
+	m := &dto.Metric{}
+	if err := c.ToolDuration.With(prometheus.Labels{"tool": "execute_operation"}).(prometheus.Histogram).Write(m); err != nil {
+		t.Fatalf("write histogram: %v", err)
+	}
+	if got := m.GetHistogram().GetSampleCount(); got != 0 {
+		t.Errorf("duration sample count = %v, want 0 (blocked calls must not pollute latency histogram)", got)
+	}
+}
+
+func TestIncCall_NilCollectorsIsNoop(t *testing.T) {
+	var c *Collectors
+	// Must not panic.
+	c.IncCall("any_tool", "blocked")
+}
+
 func TestObserve_NilCollectorsIsNoop(t *testing.T) {
 	var c *Collectors
 	// Must not panic.
