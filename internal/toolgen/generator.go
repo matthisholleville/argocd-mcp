@@ -9,6 +9,7 @@ import (
 
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
+	"github.com/matthisholleville/argocd-mcp/internal/metrics"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 
@@ -38,7 +39,7 @@ type GeneratedTool struct {
 // GenerateAll creates one MCP tool per endpoint with typed parameters.
 // Endpoints without an operationId are skipped.
 // If disableWrite is true, write methods (POST/PUT/PATCH/DELETE) are skipped as defence-in-depth.
-func GenerateAll(endpoints []openapi.Endpoint, exec Executor, limiter ratelimit.Limiter, auditor *audit.Logger, disableWrite bool) []GeneratedTool {
+func GenerateAll(endpoints []openapi.Endpoint, exec Executor, limiter ratelimit.Limiter, auditor *audit.Logger, disableWrite bool, mtx *metrics.Collectors) []GeneratedTool {
 	var tools []GeneratedTool
 	names := make([]string, 0, len(endpoints))
 
@@ -72,7 +73,7 @@ func GenerateAll(endpoints []openapi.Endpoint, exec Executor, limiter ratelimit.
 		opts = append(opts, annotationsForMethod(ep.Method)...)
 
 		tool := mcp.NewTool(name, opts...)
-		handler := buildHandler(ep, exec, limiter, auditor, name)
+		handler := buildHandler(ep, exec, limiter, auditor, name, mtx)
 
 		tools = append(tools, GeneratedTool{Tool: tool, Handler: handler})
 	}
@@ -80,7 +81,7 @@ func GenerateAll(endpoints []openapi.Endpoint, exec Executor, limiter ratelimit.
 	return tools
 }
 
-func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter, auditor *audit.Logger, toolName string) server.ToolHandlerFunc {
+func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter, auditor *audit.Logger, toolName string, mtx *metrics.Collectors) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		user := userFromContext(ctx)
 
@@ -95,6 +96,7 @@ func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter,
 					Blocked: true,
 				})
 			}
+			mtx.Observe(toolName, metrics.StatusOf(true, nil), 0)
 			return mcp.NewToolResultError("rate limit exceeded: too many requests, please slow down"), nil
 		}
 
@@ -150,6 +152,7 @@ func buildHandler(ep openapi.Endpoint, exec Executor, limiter ratelimit.Limiter,
 			}
 			auditor.LogExecute(ctx, entry)
 		}
+		mtx.Observe(toolName, metrics.StatusOf(false, err), duration)
 
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("ArgoCD API error: %v", err)), nil

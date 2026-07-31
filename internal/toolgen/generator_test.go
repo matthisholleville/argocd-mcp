@@ -91,7 +91,7 @@ func TestGenerateAll_ToolDefinition(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll(endpoints, exec, noopLimiter, nil, false)
+	tools := GenerateAll(endpoints, exec, noopLimiter, nil, false, nil)
 
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
@@ -124,7 +124,7 @@ func TestGenerateAll_SkipsNoOperationID(t *testing.T) {
 		{OperationID: "", Method: "GET", Path: "/api/v1/version", Summary: "Version"},
 	}
 
-	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, false, nil)
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool (skip empty operationId), got %d", len(tools))
 	}
@@ -140,7 +140,7 @@ func TestGenerateAll_MultipleEndpoints(t *testing.T) {
 		{OperationID: "ClusterService_List", Method: "GET", Path: "/api/v1/clusters", Summary: "List clusters"},
 	}
 
-	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, false, nil)
 	if len(tools) != 3 {
 		t.Fatalf("expected 3 tools, got %d", len(tools))
 	}
@@ -170,7 +170,7 @@ func TestHandler_PathSubstitution(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"name": "frontend"})
@@ -200,7 +200,7 @@ func TestHandler_MultiplePathParams(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"name": "myapp", "container": "main"})
@@ -227,7 +227,7 @@ func TestHandler_QueryParams(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"refresh": "true", "appNamespace": "argocd"})
@@ -261,7 +261,7 @@ func TestHandler_BodyAssembly(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{
@@ -313,7 +313,7 @@ func TestHandler_BodyAssembly_NestedJSON(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{
@@ -362,7 +362,7 @@ func TestHandler_EmptyBody(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"name": "frontend"})
@@ -386,7 +386,7 @@ func TestHandler_RateLimitApplied(t *testing.T) {
 
 	exec := newMockExecutor(200)
 	lim := ratelimit.New(context.Background(), 1, 1)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, lim, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, lim, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{})
@@ -428,7 +428,7 @@ func TestHandler_AuditLogToolName(t *testing.T) {
 	var buf bytes.Buffer
 	auditor := newTestAuditor(&buf)
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, auditor, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, auditor, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"name": "prod"})
@@ -469,7 +469,7 @@ func TestHandler_AuditLogRateLimitBlocked(t *testing.T) {
 	auditor := newTestAuditor(&buf)
 	exec := newMockExecutor(200)
 	lim := ratelimit.New(context.Background(), 1, 1)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, lim, auditor, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, lim, auditor, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"name": "myapp"})
@@ -503,7 +503,7 @@ func TestHandler_ExecuteError(t *testing.T) {
 	}
 
 	exec := &mockExecutor{err: fmt.Errorf("connection refused")}
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{})
@@ -532,7 +532,7 @@ func TestHandler_BodyAssembly_IntegerParam(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	req := buildCallToolRequest(t, map[string]any{"count": "42"})
@@ -563,7 +563,7 @@ func TestHandler_SkipEmptyOptionalParams(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	// Call without providing the optional param.
@@ -590,7 +590,7 @@ func TestHandler_MissingPathParam(t *testing.T) {
 	}
 
 	exec := newMockExecutor(200)
-	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, exec, noopLimiter, nil, false, nil)
 	handler := tools[0].Handler
 
 	// Call without providing the required path param.
@@ -620,7 +620,7 @@ func TestGenerateAll_DisableWriteExcludesWriteTools(t *testing.T) {
 			Parameters: []openapi.Parameter{{Name: "name", In: "path", Required: true, Type: "string"}}},
 	}
 
-	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, true) // disableWrite=true
+	tools := GenerateAll(endpoints, newMockExecutor(200), noopLimiter, nil, true, nil) // disableWrite=true
 
 	// Only GET tools should be generated.
 	if len(tools) != 2 {
@@ -641,7 +641,7 @@ func TestAnnotations_GetIsReadOnly(t *testing.T) {
 		Summary:     "List",
 	}
 
-	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false, nil)
 	ann := tools[0].Tool.Annotations
 
 	if ann.ReadOnlyHint == nil || *ann.ReadOnlyHint != true {
@@ -658,7 +658,7 @@ func TestAnnotations_DeleteIsDestructive(t *testing.T) {
 		Parameters:  []openapi.Parameter{{Name: "name", In: "path", Required: true, Type: "string"}},
 	}
 
-	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false, nil)
 	ann := tools[0].Tool.Annotations
 
 	if ann.ReadOnlyHint == nil || *ann.ReadOnlyHint != false {
@@ -680,7 +680,7 @@ func TestAnnotations_PostIsWrite(t *testing.T) {
 		Summary:     "Create",
 	}
 
-	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false, nil)
 	ann := tools[0].Tool.Annotations
 
 	if ann.ReadOnlyHint == nil || *ann.ReadOnlyHint != false {
@@ -700,7 +700,7 @@ func TestAnnotations_PutIsIdempotent(t *testing.T) {
 		Parameters:  []openapi.Parameter{{Name: "name", In: "path", Required: true, Type: "string"}},
 	}
 
-	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false)
+	tools := GenerateAll([]openapi.Endpoint{ep}, newMockExecutor(200), noopLimiter, nil, false, nil)
 	ann := tools[0].Tool.Annotations
 
 	if ann.IdempotentHint == nil || *ann.IdempotentHint != true {

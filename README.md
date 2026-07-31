@@ -462,6 +462,41 @@ Set `AUDIT_LOG=false` to disable.
 
 ---
 
+## Metrics
+
+Prometheus metrics are exposed at `GET /metrics` whenever `MCP_TRANSPORT=http` (there is no HTTP surface in `stdio` mode, so nothing to scrape there). Unlike audit logging, metrics are **always on** and cannot be disabled: they carry no user identity, only a bounded `tool`/`status` label set, so there's no volume or privacy reason to turn them off.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mcp_tool_calls_total` | Counter | `tool`, `status` | Total tool calls. `status` is `ok`, `blocked` (rejected by `DISABLE_WRITE`, `ALLOWED_RESOURCES`, or `RATE_LIMIT`), or `error` |
+| `mcp_tool_duration_seconds` | Histogram | `tool` | Tool call latency, including the round trip to ArgoCD |
+
+`tool` is `search_operations` / `execute_operation` in the default search mode, or the generated tool name (e.g. `argocd_application_sync`) in `TOOL_MODE=generated`.
+
+```bash
+curl http://localhost:8080/metrics | grep mcp_tool_
+```
+
+<details>
+<summary><strong>Example PromQL</strong></summary>
+
+<br/>
+
+```promql
+# Call rate by tool, last 5 minutes
+sum by (tool) (rate(mcp_tool_calls_total[5m]))
+
+# p95 latency
+histogram_quantile(0.95, sum by (le, tool) (rate(mcp_tool_duration_seconds_bucket[5m])))
+
+# Error ratio
+sum(rate(mcp_tool_calls_total{status="error"}[5m])) / sum(rate(mcp_tool_calls_total[5m]))
+```
+
+</details>
+
+---
+
 ## Configuration
 
 | Variable | Required | Default | Description |
