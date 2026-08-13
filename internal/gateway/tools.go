@@ -141,11 +141,13 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
+			mtx.IncCall("execute_operation", "error")
 			return mcp.NewToolResultError("method is required"), nil
 		}
 
 		path := req.GetString("path", "")
 		if path == "" {
+			mtx.IncCall("execute_operation", "error")
 			return mcp.NewToolResultError("path is required"), nil
 		}
 
