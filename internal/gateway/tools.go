@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matthisholleville/argocd-mcp/internal/audit"
-	"github.com/matthisholleville/argocd-mcp/internal/auth"
-	"github.com/matthisholleville/argocd-mcp/internal/openapi"
-	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/matthisholleville/argocd-mcp/internal/audit"
+	"github.com/matthisholleville/argocd-mcp/internal/auth"
+	"github.com/matthisholleville/argocd-mcp/internal/metrics"
+	"github.com/matthisholleville/argocd-mcp/internal/openapi"
+	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 )
 
 // Searcher abstracts the search backend (keyword or vector).
@@ -31,9 +32,9 @@ type ToolOptions struct {
 	AllowedResources []string
 }
 
-func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher, gw *Gateway, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger) {
-	srv.AddTool(searchTool(opts), handleSearch(searcher, auditor))
-	srv.AddTool(executeTool(opts), handleExecute(gw, opts.DisableWrite, allowed, limiter, auditor))
+func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher, gw *Gateway, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger, mtx *metrics.Collectors) {
+	srv.AddTool(searchTool(opts), handleSearch(searcher, auditor, mtx))
+	srv.AddTool(executeTool(opts), handleExecute(gw, opts.DisableWrite, allowed, limiter, auditor, mtx))
 }
 
 func searchTool(opts ToolOptions) mcp.Tool {
@@ -91,7 +92,7 @@ func executeTool(opts ToolOptions) mcp.Tool {
 	)
 }
 
-func handleSearch(searcher Searcher, auditor *audit.Logger) server.ToolHandlerFunc {
+func handleSearch(searcher Searcher, auditor *audit.Logger, mtx *metrics.Collectors) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := req.GetString("query", "")
 		start := time.Now()
@@ -113,6 +114,7 @@ func handleSearch(searcher Searcher, auditor *audit.Logger) server.ToolHandlerFu
 			}
 			auditor.LogSearch(ctx, entry)
 		}
+		mtx.Observe("search_operations", metrics.StatusOf(false, err), duration)
 
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("search failed: %v", err)), nil
@@ -135,15 +137,17 @@ func isWriteMethod(method string) bool {
 	return false
 }
 
-func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger) server.ToolHandlerFunc {
+func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpoints, limiter ratelimit.Limiter, auditor *audit.Logger, mtx *metrics.Collectors) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		method, err := req.RequireString("method")
 		if err != nil {
+			mtx.IncCall("execute_operation", "error")
 			return mcp.NewToolResultError("method is required"), nil
 		}
 
 		path := req.GetString("path", "")
 		if path == "" {
+			mtx.IncCall("execute_operation", "error")
 			return mcp.NewToolResultError("path is required"), nil
 		}
 
@@ -159,6 +163,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"write operations are disabled: %s method is not allowed (DISABLE_WRITE=true)",
 				strings.ToUpper(method),
@@ -175,6 +180,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"operation not allowed: %s %s is outside the permitted resource scope (ALLOWED_RESOURCES)",
 				strings.ToUpper(method), path,
@@ -190,6 +196,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 					Blocked: true,
 				})
 			}
+			mtx.IncCall("execute_operation", metrics.StatusOf(true, nil))
 			return mcp.NewToolResultError("rate limit exceeded: too many requests, please slow down"), nil
 		}
 
@@ -198,6 +205,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 		queryParams := make(map[string]string)
 		if raw := req.GetString("query_params", ""); raw != "" {
 			if err := json.Unmarshal([]byte(raw), &queryParams); err != nil {
+				mtx.IncCall("execute_operation", "error")
 				return mcp.NewToolResultError(fmt.Sprintf("invalid query_params JSON: %v", err)), nil
 			}
 		}
@@ -226,6 +234,7 @@ func handleExecute(gw *Gateway, disableWrite bool, allowed *openapi.AllowedEndpo
 			}
 			auditor.LogExecute(ctx, entry)
 		}
+		mtx.Observe("execute_operation", metrics.StatusOf(false, err), duration)
 
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("execute: %v", err)), nil

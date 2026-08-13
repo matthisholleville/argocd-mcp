@@ -20,9 +20,12 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
+	"github.com/matthisholleville/argocd-mcp/internal/metrics"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 	"github.com/matthisholleville/argocd-mcp/internal/toolgen"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const serverName = "argocd-mcp"
@@ -117,12 +120,20 @@ func Run(cfg *config.Config, version string) error {
 		logger.Info("audit logging enabled")
 	}
 
+	// Metrics are independent of AUDIT_LOG: they carry no user identity
+	// (just a bounded tool/status label set), so they're always on and
+	// scraped from /metrics regardless of the audit-log setting.
+	mtx := metrics.New()
+	if err := mtx.Register(prometheus.DefaultRegisterer); err != nil {
+		logger.Error("failed to register metrics", slog.String("error", err.Error()))
+	}
+
 	gateway.RegisterMCPPrompts(mcpServer)
 
 	switch cfg.ToolMode {
 	case "generated":
 		exec := toolgen.NewGatewayAdapter(gw)
-		generated := toolgen.GenerateAll(endpoints, exec, limiter, auditor, cfg.DisableWrite)
+		generated := toolgen.GenerateAll(endpoints, exec, limiter, auditor, cfg.DisableWrite, mtx)
 		for _, gt := range generated {
 			mcpServer.AddTool(gt.Tool, gt.Handler)
 		}
@@ -135,7 +146,7 @@ func Run(cfg *config.Config, version string) error {
 			EndpointCount:    len(endpoints),
 			DisableWrite:     cfg.DisableWrite,
 			AllowedResources: cfg.AllowedResources,
-		}, searcher, gw, allowed, limiter, auditor)
+		}, searcher, gw, allowed, limiter, auditor, mtx)
 	}
 
 	// 5. Resolve the OAuth proxy before announcing readiness: oidc mode reaches
@@ -215,6 +226,7 @@ func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, proxy
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	if proxy != nil {
 		mountOAuthProxy(mux, httpSrv, cfg, logger, proxy)

@@ -81,7 +81,7 @@ var noopLimiter = ratelimit.New(context.Background(), 0, 0)
 func TestHandleExecute_DisableWriteBlocksWriteMethods(t *testing.T) {
 	writeMethods := []string{"POST", "PUT", "PATCH", "DELETE"}
 	gw := newTestGateway(t)
-	handler := handleExecute(gw, true, nil, noopLimiter, nil)
+	handler := handleExecute(gw, true, nil, noopLimiter, nil, nil)
 
 	for _, method := range writeMethods {
 		t.Run(method, func(t *testing.T) {
@@ -108,7 +108,7 @@ func TestHandleExecute_DisableWriteBlocksWriteMethods(t *testing.T) {
 func TestHandleExecute_DisableWriteAllowsReadMethods(t *testing.T) {
 	readMethods := []string{"GET", "HEAD", "OPTIONS"}
 	gw := newTestGateway(t)
-	handler := handleExecute(gw, true, nil, noopLimiter, nil)
+	handler := handleExecute(gw, true, nil, noopLimiter, nil, nil)
 
 	for _, method := range readMethods {
 		t.Run(method, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestHandleExecute_DisableWriteAllowsReadMethods(t *testing.T) {
 
 func TestHandleExecute_WriteAllowedWhenNotDisabled(t *testing.T) {
 	gw := newTestGateway(t)
-	handler := handleExecute(gw, false, nil, noopLimiter, nil)
+	handler := handleExecute(gw, false, nil, noopLimiter, nil, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "DELETE",
@@ -159,7 +159,7 @@ func TestHandleExecute_AllowedResourcesBlocksOutOfScope(t *testing.T) {
 	allowed := openapi.NewAllowedEndpoints([]openapi.Endpoint{
 		{Method: "GET", Path: "/api/v1/version"},
 	})
-	handler := handleExecute(gw, false, allowed, noopLimiter, nil)
+	handler := handleExecute(gw, false, allowed, noopLimiter, nil, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "GET",
@@ -185,7 +185,7 @@ func TestHandleExecute_AllowedResourcesPermitsInScope(t *testing.T) {
 		{Method: "GET", Path: "/api/v1/applications"},
 		{Method: "GET", Path: "/api/v1/applications/{name}"},
 	})
-	handler := handleExecute(gw, false, allowed, noopLimiter, nil)
+	handler := handleExecute(gw, false, allowed, noopLimiter, nil, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "GET",
@@ -208,7 +208,7 @@ func TestHandleExecute_DisableWritePlusAllowedResources(t *testing.T) {
 	allowed := openapi.NewAllowedEndpoints([]openapi.Endpoint{
 		{Method: "GET", Path: "/api/v1/version"},
 	})
-	handler := handleExecute(gw, true, allowed, noopLimiter, nil)
+	handler := handleExecute(gw, true, allowed, noopLimiter, nil, nil)
 
 	// POST should be blocked by DISABLE_WRITE first.
 	t.Run("write_blocked_by_disable_write", func(t *testing.T) {
@@ -272,7 +272,7 @@ func TestHandleExecute_AllowedResourcesAuditLogsBlocked(t *testing.T) {
 	allowed := openapi.NewAllowedEndpoints([]openapi.Endpoint{
 		{Method: "GET", Path: "/api/v1/version"},
 	})
-	handler := handleExecute(gw, false, allowed, noopLimiter, auditor)
+	handler := handleExecute(gw, false, allowed, noopLimiter, auditor, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "GET",
@@ -299,7 +299,7 @@ func TestHandleExecute_AuditLogsSuccessfulCall(t *testing.T) {
 	var buf bytes.Buffer
 	auditor := newTestAuditor(&buf)
 	gw := newTestGateway(t)
-	handler := handleExecute(gw, false, nil, noopLimiter, auditor)
+	handler := handleExecute(gw, false, nil, noopLimiter, auditor, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "GET",
@@ -340,7 +340,7 @@ func TestHandleExecute_AuditLogsBlockedWrite(t *testing.T) {
 	var buf bytes.Buffer
 	auditor := newTestAuditor(&buf)
 	gw := newTestGateway(t)
-	handler := handleExecute(gw, true, nil, noopLimiter, auditor)
+	handler := handleExecute(gw, true, nil, noopLimiter, auditor, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "DELETE",
@@ -379,7 +379,7 @@ func TestHandleSearch_AuditLogsSuccessfulSearch(t *testing.T) {
 			{Method: "GET", Path: "/api/v1/applications", Summary: "List applications"},
 		},
 	}
-	handler := handleSearch(searcher, auditor)
+	handler := handleSearch(searcher, auditor, nil)
 
 	req := buildCallToolRequest(t, map[string]any{"query": "sync application"})
 	result, err := handler(context.Background(), req)
@@ -415,7 +415,7 @@ func TestHandleSearch_AuditLogsErrorWithZeroResultCount(t *testing.T) {
 	searcher := &stubSearcher{
 		err: fmt.Errorf("index not ready"),
 	}
-	handler := handleSearch(searcher, auditor)
+	handler := handleSearch(searcher, auditor, nil)
 
 	req := buildCallToolRequest(t, map[string]any{"query": "sync"})
 	result, err := handler(context.Background(), req)
@@ -445,7 +445,7 @@ func TestHandleExecute_RateLimitBlocks(t *testing.T) {
 	gw := newTestGateway(t)
 	// burst=1: only 1 request passes, then blocked.
 	lim := ratelimit.New(context.Background(), 1, 1)
-	handler := handleExecute(gw, false, nil, lim, nil)
+	handler := handleExecute(gw, false, nil, lim, nil, nil)
 
 	req := buildCallToolRequest(t, map[string]any{
 		"method": "GET",
