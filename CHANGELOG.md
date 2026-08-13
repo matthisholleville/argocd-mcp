@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.7.0...v1.8.0) (2026-08-13)
+
+
+### Features
+
+* expose Prometheus metrics for tool calls ([375a70c](https://github.com/matthisholleville/argocd-mcp/commit/375a70c56ec0da6bde8c660d171fd972bc7821a7))
+* expose Prometheus metrics for tool calls ([870ffa6](https://github.com/matthisholleville/argocd-mcp/commit/870ffa601bae4cd3e53afeeda8fdccf9e1211145))
+
+
+### Bug Fixes
+
+* also count missing method/path as a metrics call, not just other validation failures ([db3a2c7](https://github.com/matthisholleville/argocd-mcp/commit/db3a2c7b4352de7363741fc895e683f0faa3b029))
+* don't drop metrics on validation failures, don't pollute latency histogram with blocked calls ([8d3dbaf](https://github.com/matthisholleville/argocd-mcp/commit/8d3dbaf373270409cf412e84429108d18b685eb9))
+
 ## [1.7.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.6.0...v1.7.0) (2026-07-29)
 
 
