@@ -517,7 +517,8 @@ sum(rate(mcp_tool_calls_total{status="error"}[5m])) / sum(rate(mcp_tool_calls_to
 | `ARGOCD_SPEC_URL` | No | `{base}/swagger.json` | Override spec URL |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio` or `http` |
 | `MCP_ADDR` | No | `:8080` | HTTP listen address |
-| `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs) |
+| `ARGOCD_TLS_INSECURE` | No | `false` | Skip TLS certificate verification (set `true` for self-signed certs). Prefer `ARGOCD_CA_BUNDLE` |
+| `ARGOCD_CA_BUNDLE` | No | | Path to a PEM bundle of extra CAs to trust for ArgoCD and the OAuth provider (private PKI), on top of the system trust store. Invalid files fail at startup |
 | `TOOL_MODE` | No | `search` | `search` (2 meta-tools) or `generated` (1 tool per endpoint) |
 | `DISABLE_WRITE` | No | `false` | Block all write operations (POST, PUT, PATCH, DELETE) |
 | `ALLOWED_RESOURCES` | No | | Comma-separated list of resource tags to expose (e.g. `ApplicationService,VersionService`) |

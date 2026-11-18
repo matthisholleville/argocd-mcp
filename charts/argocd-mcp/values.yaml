@@ -28,8 +28,13 @@ argocd:
   existingSecret: ""
   # -- Override the default swagger.json URL
   specURL: ""
-  # -- Skip TLS certificate verification (for self-signed certs)
+  # -- Skip TLS certificate verification (for self-signed certs).
+  # Prefer caBundlePath, which keeps verification on.
   tlsInsecure: false
+  # -- Path, inside the container, of a PEM bundle of extra CAs to trust for
+  # ArgoCD and the OAuth provider (sets ARGOCD_CA_BUNDLE). Mount the file with
+  # extraVolumes / extraVolumeMounts.
+  caBundlePath: ""
 
 # -- Authentication settings
 auth:
@@ -186,6 +191,28 @@ securityContext:
       - ALL
   seccompProfile:
     type: RuntimeDefault
+
+# -- Extra environment variables for the argocd-mcp container (standard EnvVar
+# entries, so valueFrom works). Don't set variables the chart already manages
+# from values, such as ARGOCD_CA_BUNDLE: Kubernetes keeps the last duplicate.
+# @default -- `[]`
+extraEnv: []
+#  - name: HTTPS_PROXY
+#    value: http://proxy.example.com:3128
+
+# -- Extra volumes for the pod
+# @default -- `[]`
+extraVolumes: []
+#  - name: argocd-ca
+#    secret:
+#      secretName: argocd-ca-bundle
+
+# -- Extra volume mounts for the argocd-mcp container
+# @default -- `[]`
+extraVolumeMounts: []
+#  - name: argocd-ca
+#    mountPath: /etc/ssl/argocd
+#    readOnly: true
 
 # -- Node selector
 nodeSelector: {}

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/matthisholleville/argocd-mcp/internal/audit"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // newTestGateway creates a Gateway backed by a fake HTTP server that always returns 200 OK.
@@ -26,7 +26,7 @@ func newTestGateway(t *testing.T) *Gateway {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(srv.Close)
-	return NewGateway(srv.URL, "test-token", false, slog.Default())
+	return NewGateway(srv.URL, "test-token", nil, slog.Default())
 }
 
 func buildCallToolRequest(t *testing.T, args map[string]any) mcp.CallToolRequest {

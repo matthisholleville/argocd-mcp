@@ -3,7 +3,7 @@ CMD     := ./cmd/argocd-mcp
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build run test e2e docker-build clean
+.PHONY: build run test e2e chart-test docker-build clean
 
 build:
 	@mkdir -p bin
@@ -19,6 +19,10 @@ test:
 
 e2e:
 	go test -tags e2e -count=1 -v -timeout 15m ./e2e/...
+
+chart-test:
+	helm dependency build charts/argocd-mcp
+	go test -tags chart -count=1 ./hack/charttest/
 
 docker-build:
 	docker build -t $(BINARY):$(VERSION) .

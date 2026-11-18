@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,13 +25,12 @@ type Gateway struct {
 }
 
 // NewGateway creates a Gateway targeting the given ArgoCD instance.
-// When tlsInsecure is true, TLS certificate verification is skipped.
-func NewGateway(baseURL, staticToken string, tlsInsecure bool, logger *slog.Logger) *Gateway {
+func NewGateway(baseURL, staticToken string, tlsConfig *tls.Config, logger *slog.Logger) *Gateway {
 	return &Gateway{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   staticToken,
 		logger:  logger,
-		client:  httputil.NewClient(30*time.Second, tlsInsecure),
+		client:  httputil.NewClient(30*time.Second, tlsConfig),
 	}
 }
 

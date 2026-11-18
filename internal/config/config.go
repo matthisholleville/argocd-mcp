@@ -77,6 +77,10 @@ type Config struct {
 	// Defaults to false (secure). Set to true only when ArgoCD uses self-signed
 	// certificates that cannot be added to the trust store.
 	TLSInsecure bool
+	// CABundlePath is a PEM file of extra CAs to trust for ArgoCD and the OAuth
+	// provider, on top of the system pool: the alternative to TLSInsecure for
+	// a private PKI.
+	CABundlePath string
 	// DisableWrite excludes disruptive endpoints (POST, PUT, PATCH, DELETE)
 	// from search results and blocks their execution.
 	DisableWrite bool
@@ -140,6 +144,7 @@ func Load() (*Config, error) {
 		OllamaURL:         getEnvOrDefault("OLLAMA_URL", "http://localhost:11434/api"),
 		EmbeddingsModel:   getEnvOrDefault("EMBEDDINGS_MODEL", "nomic-embed-text"),
 		TLSInsecure:       tlsInsecure,
+		CABundlePath:      os.Getenv("ARGOCD_CA_BUNDLE"),
 		DisableWrite:      disableWrite,
 		AllowedResources:  parseCSV("ALLOWED_RESOURCES"),
 		ToolMode:          getEnvOrDefault("TOOL_MODE", "search"),

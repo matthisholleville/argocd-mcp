@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,12 +43,19 @@ func Run(cfg *config.Config, version string) error {
 	if cfg.TLSInsecure {
 		logger.Warn("TLS certificate verification is DISABLED (ARGOCD_TLS_INSECURE=true)")
 	}
+	tlsConfig, err := httputil.TLSConfig(cfg.TLSInsecure, cfg.CABundlePath)
+	if err != nil {
+		return fmt.Errorf("TLS setup: %w", err)
+	}
+	if cfg.CABundlePath != "" {
+		logger.Info("trusting custom CA bundle", slog.String("path", cfg.CABundlePath))
+	}
 
 	const fetchSpecTimeout = 30 * time.Second
 	fetchCtx, fetchCancel := context.WithTimeout(ctx, fetchSpecTimeout)
 	defer fetchCancel()
 
-	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
+	endpoints, err := openapi.FetchAndParse(fetchCtx, cfg.SpecURL, cfg.ArgoCDToken, tlsConfig, logger)
 	if err != nil {
 		logger.Error("failed to load ArgoCD spec", slog.String("url", cfg.SpecURL), slog.String("error", err.Error()))
 		return fmt.Errorf("load ArgoCD spec: %w", err)
@@ -86,7 +94,7 @@ func Run(cfg *config.Config, version string) error {
 	}
 
 	// 3. Build the gateway.
-	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, cfg.TLSInsecure, logger)
+	gw := gateway.NewGateway(cfg.ArgoCDBaseURL, cfg.ArgoCDToken, tlsConfig, logger)
 
 	// 4. Create MCP server.
 	mcpServer := server.NewMCPServer(
@@ -152,7 +160,7 @@ func Run(cfg *config.Config, version string) error {
 	// 5. Resolve the OAuth proxy before announcing readiness: oidc mode reaches
 	// out to ArgoCD and to the provider, and a server that logged "ready" and
 	// then died on discovery is a confusing way to report a misconfiguration.
-	proxy, err := resolveOAuthProxy(ctx, cfg, logger)
+	proxy, err := resolveOAuthProxy(ctx, cfg, tlsConfig, logger)
 	if err != nil {
 		return err
 	}
@@ -276,7 +284,7 @@ type oauthProxy struct {
 // resolveOAuthProxy works out which provider to proxy to, reaching out to
 // ArgoCD and the provider in oidc mode. Called before the server reports ready
 // so a misconfiguration surfaces as a startup failure.
-func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*oauthProxy, error) {
+func resolveOAuthProxy(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config, logger *slog.Logger) (*oauthProxy, error) {
 	switch cfg.AuthMode {
 	case "oauth":
 		dexBase := strings.TrimRight(cfg.ArgoCDBaseURL, "/") + "/api/dex"
@@ -293,7 +301,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 			token: auth.TokenOptions{
 				TokenEndpoint: dexBase + "/token",
 				ClientID:      cfg.DexClientID,
-				TLSInsecure:   cfg.TLSInsecure,
+				TLSConfig:     tlsConfig,
 			},
 		}, nil
 
@@ -301,7 +309,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 		// Honour ARGOCD_TLS_INSECURE like every other outbound path: discovery
 		// talks to the same ArgoCD the spec fetch already reached, so verifying
 		// here and not there only crashloops the pod.
-		client := httputil.NewClient(15*time.Second, cfg.TLSInsecure)
+		client := httputil.NewClient(15*time.Second, tlsConfig)
 
 		var callbackURL string
 		var stateCodec *auth.StateCodec
@@ -371,7 +379,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 				ClientSecret:   cfg.OIDCClientSecret,
 				RedirectURI:    callbackURL,
 				RequireIDToken: true,
-				TLSInsecure:    cfg.TLSInsecure,
+				TLSConfig:      tlsConfig,
 			},
 			stateCodec: stateCodec,
 		}, nil

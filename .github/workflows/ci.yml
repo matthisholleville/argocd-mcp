@@ -70,6 +70,13 @@ jobs:
       - name: Lint chart with embeddings (ollama subchart)
         run: helm lint charts/argocd-mcp --set argocd.baseURL=https://argocd.example.com --set argocd.token=test --set embeddings.enabled=true
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.4"
+
+      - name: Chart template tests
+        run: make chart-test
+
   helm-diff:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -19,6 +19,7 @@ Use `make` targets. They are the source of truth for builds and tests.
 make build         # Build binary to ./bin/argocd-mcp
 make test          # go test -race -count=1 ./... (unit tests, no Docker)
 make e2e           # E2E against a real ArgoCD in k3s (requires Docker, ~1-2 min)
+make chart-test    # Helm template tests (requires helm): renders the chart and asserts on the Deployment
 make run           # Build + run with ARGOCD_BASE_URL / ARGOCD_TOKEN from env
 make docker-build  # Build the container image
 ./hack/helm-diff.sh origin/main   # Diff of the rendered chart vs a base ref (default + embeddings profiles)
@@ -127,6 +128,7 @@ How the harness works:
 
 ## Helm chart
 
+- Chart changes follow red/green too: add a case to `hack/charttest/chart_test.go` (build tag `chart`, renders with `helm template` and decodes the Deployment) before touching `charts/argocd-mcp/templates/`.
 - CI lints the chart with the default values **and** with `embeddings.enabled=true` (otherwise the ollama subchart is never rendered).
 - On every PR, the `helm-diff` job renders the chart on the base branch and on the PR (`hack/helm-diff.sh`) and posts the manifest diff as a sticky PR comment. The comment is removed when the rendered chart is unchanged. Review it for any chart or subchart change.
 

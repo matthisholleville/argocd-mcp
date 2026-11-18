@@ -19,7 +19,7 @@ func newGatewayWithHandler(t *testing.T, handler http.HandlerFunc) *Gateway {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return NewGateway(srv.URL, "test-token", false, silentLogger())
+	return NewGateway(srv.URL, "test-token", nil, silentLogger())
 }
 
 // ArgoCD logs endpoint returns NDJSON (one JSON object per line).
