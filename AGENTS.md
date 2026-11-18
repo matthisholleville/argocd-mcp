@@ -80,18 +80,31 @@ In OAuth modes, `Gateway.Execute` forwards the caller's bearer token (`auth.GetB
 
 ## Testing
 
-### Test-Driven Development
+### Test-Driven Development (mandatory, red/green)
 
-Write a failing test, watch it fail for the right reason, then implement. Unit tests are table-driven where it fits, use `httptest` fakes for ArgoCD, and run with `-race`.
+**Every change** (feature, bug fix, refactor, dependency bump that changes behaviour) goes through red/green:
 
-### E2E tests
+1. **Red**: write the test first, run it, and **watch it fail for the right reason**: the assertion about the missing behaviour, not a compile error or a typo.
+2. **Green**: write the minimum code that makes it pass. Run the test again.
+3. **Refactor** only while everything stays green.
 
-Follows the OpenFGA `testfixtures` pattern:
+- A bug fix starts with a test that reproduces the bug.
+- A refactor without a behaviour change must keep the existing tests green before and after.
+- Never write the implementation first and the test afterwards, and never weaken an assertion to get to green.
+- In the PR, state which tests were red before the change and green after.
+
+Unit tests are table-driven where it fits, use `httptest` fakes for ArgoCD, and run with `-race` (`make test`).
+
+### E2E coverage (as much as possible)
+
+Any behaviour an MCP client can observe **must** be covered by an e2e test against the real ArgoCD, in addition to unit tests: tools, tool modes, annotations, guards (`DISABLE_WRITE`, `ALLOWED_RESOURCES`, rate limit), transports, protocol versions, and calls to the ArgoCD API. The e2e test also goes red first, then green (`make e2e`). If something genuinely cannot be covered end to end (e.g. a third-party OIDC provider), say so in the PR and explain why.
+
+How the harness works:
 
 - `fixtures.RunArgoCD(t)` starts **one shared** k3s container per package (testcontainers-go), installs a pinned ArgoCD version, scales it down to `argocd-server` + redis, seeds the `guestbook` Application (as a CR, never synced) and returns a URL + admin token. `fixtures.CleanupArgoCD()` runs from `TestMain`.
 - `TestMain` builds the real `argocd-mcp` binary; tests start it with their own env (`startHTTPServer`, `connectStdio`) and drive it with the mcp-go client, pinning the protocol version (`client.WithProtocolVersion`).
 - Cover both protocol generations: `2025-11-25` (initialize handshake) and `2026-07-28` (stateless).
-- `e2e` is a **required status check on `main`**. Add an e2e case for any behaviour visible to MCP clients (new tool, mode, guard, annotation).
+- `e2e` is a **required status check on `main`**.
 
 ## Files You Must Not Edit
 
@@ -114,7 +127,7 @@ Follows the OpenFGA `testfixtures` pattern:
 
 ## Common Development Tasks
 
-- **New configuration option**: field + doc comment in `internal/config/config.go` → parse/validate in `Load` → test in `config_test.go` → wire in `internal/server/server.go` → document in `README.md` → expose in the chart (`charts/argocd-mcp/values.yaml` + env in `templates/deployment.yaml`).
-- **New tool or tool behaviour (search mode)**: `internal/gateway/tools.go` (definition + annotations + handler) → unit test in `tools_test.go` → e2e case in `e2e/argocd_test.go`.
-- **Generated-mode change**: `internal/toolgen/` (naming, params, annotations) → `generator_test.go` → e2e case.
-- **Auth change**: `internal/auth/` with regression tests (see `proxy_regression_test.go`); redirect and state validation are security-sensitive.
+- **New configuration option**: failing test in `config_test.go` (+ e2e case for its effect) → field + doc comment in `internal/config/config.go` → parse/validate in `Load` → wire in `internal/server/server.go` → document in `README.md` → expose in the chart (`charts/argocd-mcp/values.yaml` + env in `templates/deployment.yaml`).
+- **New tool or tool behaviour (search mode)**: failing unit test in `internal/gateway/tools_test.go` + failing e2e case in `e2e/argocd_test.go` → implement in `internal/gateway/tools.go` (definition + annotations + handler) → both green.
+- **Generated-mode change**: failing tests in `internal/toolgen/generator_test.go` + e2e case → implement in `internal/toolgen/` → green.
+- **Auth change**: failing regression test first (see `proxy_regression_test.go`) → change `internal/auth/` → green; redirect and state validation are security-sensitive.
