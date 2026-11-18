@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,6 +101,35 @@ func TestGeneratedMode(t *testing.T) {
 	res := callTool(t, c, "argocd_application_list", map[string]any{})
 	if res.IsError || !strings.Contains(resultText(res), fixtures.DemoApp) {
 		t.Fatalf("argocd_application_list did not return %q: %s", fixtures.DemoApp, resultText(res))
+	}
+}
+
+func TestVectorSearch(t *testing.T) {
+	argo := fixtures.RunArgoCD(t)
+	ollama := fixtures.RunOllama(t)
+	endpoint := startHTTPServer(t, serverEnv(argo,
+		"EMBEDDINGS_ENABLED=true",
+		"OLLAMA_URL="+ollama.URL,
+		"EMBEDDINGS_MODEL="+fixtures.EmbeddingsModel,
+	))
+	c := connectHTTP(t, endpoint, mcp.LATEST_PROTOCOL_VERSION)
+
+	res := callTool(t, c, "search_operations", map[string]any{"query": "uninstall software"})
+	if res.IsError {
+		t.Fatalf("search failed: %s", resultText(res))
+	}
+	var hits []struct {
+		OperationID string `json:"operation_id"`
+	}
+	if err := json.Unmarshal([]byte(resultText(res)), &hits); err != nil {
+		t.Fatalf("decode search results: %v: %s", err, resultText(res))
+	}
+	top := make([]string, 0, 3)
+	for _, h := range hits[:min(len(hits), 3)] {
+		top = append(top, h.OperationID)
+	}
+	if !slices.Contains(top, "ApplicationService_Delete") {
+		t.Fatalf("semantic query did not rank ApplicationService_Delete in the top 3, got %v", top)
 	}
 }
 

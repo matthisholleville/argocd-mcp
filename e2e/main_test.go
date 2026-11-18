@@ -39,6 +39,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	fixtures.CleanupArgoCD()
+	fixtures.CleanupOllama()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
