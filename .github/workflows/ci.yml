@@ -38,6 +38,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: E2E (k3s + ArgoCD)
+        run: make e2e
+
   helm-lint:
     runs-on: ubuntu-latest
     steps:
@@ -57,7 +69,7 @@ jobs:
 
   helm-push-dev:
     runs-on: ubuntu-latest
-    needs: [build, lint, helm-lint]
+    needs: [build, lint, helm-lint, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: helm-push
     steps:
@@ -88,7 +100,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    needs: [build, lint, helm-lint]
+    needs: [build, lint, helm-lint, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
