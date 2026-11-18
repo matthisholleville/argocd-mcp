@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "postUpdateOptions": ["gomodTidy"],
+  "vulnerabilityAlerts": {
+    "labels": ["security"]
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": true
+    },
+    {
+      "groupName": "Go toolchain",
+      "matchDepNames": ["go", "golang"],
+      "rangeStrategy": "bump",
+      "automerge": false
+    },
+    {
+      "matchManagers": ["helmv3"],
+      "automerge": false
+    }
+  ]
+}
