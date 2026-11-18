@@ -2,7 +2,6 @@ package openapi
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -31,13 +30,7 @@ func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool,
 
 func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (json.RawMessage, error) {
 	// Timeout is governed by the ctx deadline passed by the caller.
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
-			},
-		},
-	}
+	client := httputil.NewClient(0, tlsInsecure)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
 	if err != nil {

@@ -91,6 +91,20 @@ func startHTTPServer(t *testing.T, env []string) string {
 	}
 }
 
+func runServerExpectingFailure(t *testing.T, env []string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Env = append(env, "MCP_TRANSPORT=http", "MCP_ADDR=127.0.0.1:0")
+	out, err := cmd.CombinedOutput()
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("argocd-mcp was expected to fail at startup:\n%s", out)
+	}
+	return string(out)
+}
+
 func connect(t *testing.T, tr transport.Interface, protocolVersion string) *client.Client {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

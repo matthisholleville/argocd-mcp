@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,14 +30,7 @@ func NewGateway(baseURL, staticToken string, tlsInsecure bool, logger *slog.Logg
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   staticToken,
 		logger:  logger,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: tlsInsecure, //nolint:gosec // Configurable via ARGOCD_TLS_INSECURE
-				},
-			},
-		},
+		client:  httputil.NewClient(30*time.Second, tlsInsecure),
 	}
 }
 

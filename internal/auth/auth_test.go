@@ -491,3 +491,26 @@ func TestGetBearerToken_EmptyStringIsNoToken(t *testing.T) {
 		t.Error("expected empty string to be treated as no token")
 	}
 }
+
+func TestHandleToken_HonorsTLSInsecure(t *testing.T) {
+	dex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "opaque-access",
+			"id_token":     "jwt-id-token",
+			"token_type":   "bearer",
+		})
+	}))
+	defer dex.Close()
+
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli", TLSInsecure: true})
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token exchange against self-signed Dex with TLSInsecure: status %d, body %s", rec.Code, rec.Body.String())
+	}
+}

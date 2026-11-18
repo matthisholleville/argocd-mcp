@@ -68,6 +68,7 @@ In OAuth modes, `Gateway.Execute` forwards the caller's bearer token (`auth.GetB
 
 - **Guards are enforced twice**: `DISABLE_WRITE` and `ALLOWED_RESOURCES` filter the endpoint list at startup (`internal/server/server.go`), **and** `handleExecute` re-checks both on every `execute_operation` call, since the agent controls `method` and `path`. In `generated` mode, out-of-scope tools are never created and `GenerateAll` skips write methods again as defence-in-depth. Never drop one of the two layers.
 - **Tool annotations must be explicit**: `mcp.NewTool` defaults to `destructiveHint=true, readOnlyHint=false`. Every tool must set its annotations (see `annotationsForMethod` in `internal/toolgen/generator.go` and `searchTool`/`executeTool` in `internal/gateway/tools.go`).
+- **Outbound HTTP goes through `httputil.NewClient`**: it clones `http.DefaultTransport` (keeps `HTTP(S)_PROXY`, timeouts, HTTP/2) and applies `ARGOCD_TLS_INSECURE`. Never build an `http.Client` or a zero `http.Transport` by hand: that is how the OAuth token exchange ended up ignoring both.
 - **Never log tokens**. Audit logs identify the user by the email claim of their token (`static-token` in token mode), never by the token itself.
 - **Metrics labels stay bounded**: tool name and status only, no user or path labels.
 
