@@ -1,0 +1,120 @@
+# AGENTS.md
+
+This file provides guidance to AI coding agents when working with code in this repository.
+
+## Project Overview
+
+argocd-mcp is an MCP (Model Context Protocol) server that exposes the ArgoCD API to AI agents. It fetches ArgoCD's OpenAPI spec at startup and turns it into MCP tools, either as two meta-tools (`search_operations` + `execute_operation`) or as one generated tool per endpoint.
+
+**Project priorities** (in order):
+1. **Safety**: never let an agent do more than the operator allowed (`DISABLE_WRITE`, `ALLOWED_RESOURCES`, user-scoped tokens, rate limits)
+2. **Correctness**: tool calls must map exactly to the ArgoCD API, and tool annotations must tell the truth
+3. **Simplicity**: minimum code, no speculative features or configurability
+
+## Development Commands
+
+Use `make` targets. They are the source of truth for builds and tests.
+
+```bash
+make build         # Build binary to ./bin/argocd-mcp
+make test          # go test -race -count=1 ./... (unit tests, no Docker)
+make e2e           # E2E against a real ArgoCD in k3s (requires Docker, ~1-2 min)
+make run           # Build + run with ARGOCD_BASE_URL / ARGOCD_TOKEN from env
+make docker-build  # Build the container image
+go vet ./... && go vet -tags e2e ./e2e/...   # What CI's lint job runs
+```
+
+## Architecture
+
+```text
+startup: fetch {ARGOCD_BASE_URL}/swagger.json → parse endpoints → filter (DISABLE_WRITE, ALLOWED_RESOURCES) → build searcher → register tools
+request: MCP client → transport (stdio | Streamable HTTP /mcp) → [auth middleware] → tool handler → rate limit → Gateway → ArgoCD API
+```
+
+### Directory Structure
+
+| Directory | Purpose |
+|---|---|
+| `cmd/argocd-mcp/` | Entrypoint: loads config, calls `server.Run` |
+| `internal/server/` | Wiring: spec loading, tool mode switch, MCP server, HTTP mux (`/mcp`, `/healthz`, `/readyz`, `/metrics`), OAuth proxy mounting, graceful shutdown |
+| `internal/config/` | All configuration, from environment variables only (`config.Load`) |
+| `internal/openapi/` | Spec fetch/parse, read-only and tag filters, keyword search and Ollama vector search |
+| `internal/gateway/` | `search` tool mode: the two meta-tools, MCP prompts, and `Gateway`, the HTTP client to ArgoCD |
+| `internal/toolgen/` | `generated` tool mode: one MCP tool per endpoint (naming, params, annotations) |
+| `internal/auth/` | OAuth modes: Dex (`oauth`) and external OIDC (`oidc`) proxy, metadata, callback state, bearer passthrough |
+| `internal/audit/` | Structured audit log of every tool call (`AUDIT_LOG`) |
+| `internal/metrics/` | Prometheus collectors for tool calls |
+| `internal/ratelimit/` | Per-user token-bucket limiter for executions |
+| `e2e/` | E2E tests (build tag `e2e`); `e2e/fixtures` starts k3s + ArgoCD |
+| `charts/argocd-mcp/` | Helm chart (version bumped by release-please) |
+
+### Tool modes (`TOOL_MODE`)
+
+- `search` (default): `search_operations` (searches the local endpoint index, never calls ArgoCD) and `execute_operation` (calls ArgoCD). Code in `internal/gateway/tools.go`.
+- `generated`: one tool per endpoint, named `argocd_<service>_<action>` (e.g. `ApplicationService_List` → `argocd_application_list`). Code in `internal/toolgen/`.
+
+### Auth modes (`AUTH_MODE`)
+
+- `token` (default): static `ARGOCD_TOKEN` for every call; `/mcp` is unauthenticated.
+- `oauth`: proxies ArgoCD's bundled Dex; the user's id_token is forwarded to ArgoCD.
+- `oidc`: proxies the external provider ArgoCD trusts (read from ArgoCD's `oidc.config` unless overridden).
+
+In OAuth modes, `Gateway.Execute` forwards the caller's bearer token (`auth.GetBearerToken(ctx)`), so ArgoCD RBAC applies per user. The static token is only the fallback.
+
+## Code Conventions
+
+### Safety invariants
+
+- **Guards are enforced twice**: `DISABLE_WRITE` and `ALLOWED_RESOURCES` filter the endpoint list at startup (`internal/server/server.go`), **and** `handleExecute` re-checks both on every `execute_operation` call, since the agent controls `method` and `path`. In `generated` mode, out-of-scope tools are never created and `GenerateAll` skips write methods again as defence-in-depth. Never drop one of the two layers.
+- **Tool annotations must be explicit**: `mcp.NewTool` defaults to `destructiveHint=true, readOnlyHint=false`. Every tool must set its annotations (see `annotationsForMethod` in `internal/toolgen/generator.go` and `searchTool`/`executeTool` in `internal/gateway/tools.go`).
+- **Never log tokens**. Audit logs identify the user by the email claim of their token (`static-token` in token mode), never by the token itself.
+- **Metrics labels stay bounded**: tool name and status only, no user or path labels.
+
+### Style
+
+- Errors: wrap with context, `fmt.Errorf("load ArgoCD spec: %w", err)`.
+- Logging: `log/slog` JSON to stderr (stdout is the MCP stdio channel: never print to it).
+- Constructors: `New<Type>()`; dependencies are injected via constructors, not globals.
+- **No superfluous comments.** Comment only the non-obvious *why*. Do not narrate the code.
+- Keep changes surgical: don't refactor or reformat code unrelated to the task.
+
+## Testing
+
+### Test-Driven Development
+
+Write a failing test, watch it fail for the right reason, then implement. Unit tests are table-driven where it fits, use `httptest` fakes for ArgoCD, and run with `-race`.
+
+### E2E tests
+
+Follows the OpenFGA `testfixtures` pattern:
+
+- `fixtures.RunArgoCD(t)` starts **one shared** k3s container per package (testcontainers-go), installs a pinned ArgoCD version, scales it down to `argocd-server` + redis, seeds the `guestbook` Application (as a CR, never synced) and returns a URL + admin token. `fixtures.CleanupArgoCD()` runs from `TestMain`.
+- `TestMain` builds the real `argocd-mcp` binary; tests start it with their own env (`startHTTPServer`, `connectStdio`) and drive it with the mcp-go client, pinning the protocol version (`client.WithProtocolVersion`).
+- Cover both protocol generations: `2025-11-25` (initialize handshake) and `2026-07-28` (stateless).
+- `e2e` is a **required status check on `main`**. Add an e2e case for any behaviour visible to MCP clients (new tool, mode, guard, annotation).
+
+## Files You Must Not Edit
+
+- **`CHANGELOG.md`, `.release-please-manifest.json`**, and the chart `version`/`appVersion` in `charts/argocd-mcp/Chart.yaml`: owned by release-please.
+- **`go.sum`**: only via `go get` / `go mod tidy`.
+
+## Common Gotchas
+
+- **Go version is pinned in four places**: `go.mod` (`go` directive), `Dockerfile` (`golang:<ver>-alpine@sha256:…`), and `go-version` in `.github/workflows/ci.yml` and `release.yml`. Renovate updates them together in its "Go toolchain" group. If you change one by hand, change all of them.
+- **The builder image sets `GOTOOLCHAIN=local`**: its Go must be ≥ the `go.mod` directive, or `docker build` fails.
+- **testcontainers-go and Go versions**: a testcontainers release can raise the minimum Go version for the whole module. Check `go.mod` after bumping it.
+- **e2e code only compiles with `-tags e2e`**: plain `go build ./...` / `go vet ./...` skip it, and so do gopls diagnostics unless the tag is configured.
+- **Stdio transport and contexts**: the mcp-go stdio transport ties the subprocess to the context passed to `Start`. Pass a long-lived context (`t.Context()` in tests), not a short timeout.
+- **mcp-go protocol eras**: since v1.x the server serves both the legacy handshake and the stateless 2026-07-28 core on the same endpoint. Don't add logic that depends on `initialize` having happened (hooks, session state).
+
+## Commits and Releases
+
+- **Conventional Commits** are required: release-please derives versions and the changelog from them. `feat:` → minor, `fix:` → patch, `chore:`/`test:`/`docs:` → no release. Use `fix(deps):` when a dependency or toolchain update changes the shipped binary or image.
+- PRs target `main`; dependency updates come from Renovate (`renovate.json`): minor/patch/digest are automerged when CI is green, while the Go toolchain and Helm chart dependencies need review.
+
+## Common Development Tasks
+
+- **New configuration option**: field + doc comment in `internal/config/config.go` → parse/validate in `Load` → test in `config_test.go` → wire in `internal/server/server.go` → document in `README.md` → expose in the chart (`charts/argocd-mcp/values.yaml` + env in `templates/deployment.yaml`).
+- **New tool or tool behaviour (search mode)**: `internal/gateway/tools.go` (definition + annotations + handler) → unit test in `tools_test.go` → e2e case in `e2e/argocd_test.go`.
+- **Generated-mode change**: `internal/toolgen/` (naming, params, annotations) → `generator_test.go` → e2e case.
+- **Auth change**: `internal/auth/` with regression tests (see `proxy_regression_test.go`); redirect and state validation are security-sensitive.
