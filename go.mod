@@ -1,6 +1,6 @@
 module github.com/matthisholleville/argocd-mcp
 
-go 1.26.11
+go 1.27.4
 
 require (
 	github.com/mark3labs/mcp-go v1.5.0
