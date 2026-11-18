@@ -97,9 +97,11 @@ func bootstrap(ctx context.Context, t testing.TB) (*ArgoCD, error) {
 		{"-n", "argocd", "rollout", "status", "deployment/argocd-server", "--timeout=5m"},
 	}
 	for _, args := range steps {
+		start := time.Now()
 		if _, err := kubectl(ctx, args...); err != nil {
 			return nil, err
 		}
+		t.Logf("kubectl %s (%s)", strings.Join(args[:min(len(args), 4)], " "), time.Since(start).Round(time.Second))
 	}
 
 	if err := seedApplication(ctx); err != nil {

@@ -11,9 +11,13 @@
       "automerge": true
     },
     {
+      "matchDepNames": ["go", "golang"],
+      "rangeStrategy": "bump"
+    },
+    {
       "groupName": "Go toolchain",
       "matchDepNames": ["go", "golang"],
-      "rangeStrategy": "bump",
+      "matchUpdateTypes": ["major", "minor", "patch"],
       "automerge": false
     },
     {
