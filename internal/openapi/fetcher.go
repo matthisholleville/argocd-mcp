@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,10 +12,10 @@ import (
 )
 
 // FetchAndParse fetches the ArgoCD Swagger spec and returns the parsed endpoints.
-func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool, logger *slog.Logger) ([]Endpoint, error) {
+func FetchAndParse(ctx context.Context, specURL, token string, tlsConfig *tls.Config, logger *slog.Logger) ([]Endpoint, error) {
 	logger.Info("fetching ArgoCD OpenAPI spec", slog.String("url", specURL))
 
-	raw, err := fetchSpec(ctx, specURL, token, tlsInsecure)
+	raw, err := fetchSpec(ctx, specURL, token, tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("fetch spec: %w", err)
 	}
@@ -28,9 +29,9 @@ func FetchAndParse(ctx context.Context, specURL, token string, tlsInsecure bool,
 	return endpoints, nil
 }
 
-func fetchSpec(ctx context.Context, specURL, token string, tlsInsecure bool) (json.RawMessage, error) {
+func fetchSpec(ctx context.Context, specURL, token string, tlsConfig *tls.Config) (json.RawMessage, error) {
 	// Timeout is governed by the ctx deadline passed by the caller.
-	client := httputil.NewClient(0, tlsInsecure)
+	client := httputil.NewClient(0, tlsConfig)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
 	if err != nil {

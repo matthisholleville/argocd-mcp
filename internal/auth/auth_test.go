@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -503,7 +504,7 @@ func TestHandleToken_HonorsTLSInsecure(t *testing.T) {
 	}))
 	defer dex.Close()
 
-	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli", TLSInsecure: true})
+	handler := HandleToken(TokenOptions{TokenEndpoint: dex.URL, ClientID: "argo-cd-cli", TLSConfig: &tls.Config{InsecureSkipVerify: true}})
 	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader("grant_type=authorization_code&code=abc"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()

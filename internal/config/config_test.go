@@ -316,3 +316,17 @@ func TestParseCSV_AllWhitespace(t *testing.T) {
 		t.Errorf("expected 0 values for all-whitespace, got %v", result)
 	}
 }
+
+func TestLoad_CABundle(t *testing.T) {
+	envs := minimalEnv()
+	envs["ARGOCD_CA_BUNDLE"] = "/etc/ssl/argocd/ca.pem"
+	setEnvs(t, envs)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CABundlePath != "/etc/ssl/argocd/ca.pem" {
+		t.Errorf("expected ARGOCD_CA_BUNDLE to be loaded, got %q", cfg.CABundlePath)
+	}
+}

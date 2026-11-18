@@ -5,9 +5,12 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -149,6 +152,27 @@ func TestTLSVerification(t *testing.T) {
 		out := runServerExpectingFailure(t, serverEnv(argo, "ARGOCD_BASE_URL="+tlsArgo.URL))
 		if !strings.Contains(out, "certificate") {
 			t.Fatalf("startup did not fail on certificate verification:\n%s", out)
+		}
+	})
+
+	t.Run("ARGOCD_CA_BUNDLE trusts a private CA", func(t *testing.T) {
+		bundle := filepath.Join(t.TempDir(), "ca.pem")
+		if err := os.WriteFile(bundle, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsArgo.Certificate().Raw}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		endpoint := startHTTPServer(t, serverEnv(argo, "ARGOCD_BASE_URL="+tlsArgo.URL, "ARGOCD_CA_BUNDLE="+bundle))
+		c := connectHTTP(t, endpoint, mcp.LATEST_PROTOCOL_VERSION)
+
+		res := callTool(t, c, "execute_operation", map[string]any{"method": "GET", "path": "/api/v1/applications"})
+		if res.IsError || !strings.Contains(resultText(res), fixtures.DemoApp) {
+			t.Fatalf("listing applications with the CA bundle did not return %q: %s", fixtures.DemoApp, resultText(res))
+		}
+	})
+
+	t.Run("unreadable ARGOCD_CA_BUNDLE fails at startup", func(t *testing.T) {
+		out := runServerExpectingFailure(t, serverEnv(argo, "ARGOCD_BASE_URL="+tlsArgo.URL, "ARGOCD_CA_BUNDLE=/nonexistent/ca.pem"))
+		if !strings.Contains(out, "CA bundle") {
+			t.Fatalf("startup did not fail on the CA bundle:\n%s", out)
 		}
 	})
 
