@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,6 +19,7 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/auth"
 	"github.com/matthisholleville/argocd-mcp/internal/config"
 	"github.com/matthisholleville/argocd-mcp/internal/gateway"
+	"github.com/matthisholleville/argocd-mcp/internal/httputil"
 	"github.com/matthisholleville/argocd-mcp/internal/metrics"
 	"github.com/matthisholleville/argocd-mcp/internal/openapi"
 	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
@@ -293,6 +293,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 			token: auth.TokenOptions{
 				TokenEndpoint: dexBase + "/token",
 				ClientID:      cfg.DexClientID,
+				TLSInsecure:   cfg.TLSInsecure,
 			},
 		}, nil
 
@@ -300,12 +301,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 		// Honour ARGOCD_TLS_INSECURE like every other outbound path: discovery
 		// talks to the same ArgoCD the spec fetch already reached, so verifying
 		// here and not there only crashloops the pod.
-		client := &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.TLSInsecure}, //nolint:gosec // operator opt-in, same flag as the spec fetch
-			},
-		}
+		client := httputil.NewClient(15*time.Second, cfg.TLSInsecure)
 
 		var callbackURL string
 		var stateCodec *auth.StateCodec
@@ -375,6 +371,7 @@ func resolveOAuthProxy(ctx context.Context, cfg *config.Config, logger *slog.Log
 				ClientSecret:   cfg.OIDCClientSecret,
 				RedirectURI:    callbackURL,
 				RequireIDToken: true,
+				TLSInsecure:    cfg.TLSInsecure,
 			},
 			stateCodec: stateCodec,
 		}, nil

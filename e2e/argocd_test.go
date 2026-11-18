@@ -5,6 +5,9 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -131,6 +134,33 @@ func TestVectorSearch(t *testing.T) {
 	if !slices.Contains(top, "ApplicationService_Delete") {
 		t.Fatalf("semantic query did not rank ApplicationService_Delete in the top 3, got %v", top)
 	}
+}
+
+func TestTLSVerification(t *testing.T) {
+	argo := fixtures.RunArgoCD(t)
+	upstream, err := url.Parse(argo.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsArgo := httptest.NewTLSServer(httputil.NewSingleHostReverseProxy(upstream))
+	t.Cleanup(tlsArgo.Close)
+
+	t.Run("self-signed certificate is rejected by default", func(t *testing.T) {
+		out := runServerExpectingFailure(t, serverEnv(argo, "ARGOCD_BASE_URL="+tlsArgo.URL))
+		if !strings.Contains(out, "certificate") {
+			t.Fatalf("startup did not fail on certificate verification:\n%s", out)
+		}
+	})
+
+	t.Run("ARGOCD_TLS_INSECURE skips verification", func(t *testing.T) {
+		endpoint := startHTTPServer(t, serverEnv(argo, "ARGOCD_BASE_URL="+tlsArgo.URL, "ARGOCD_TLS_INSECURE=true"))
+		c := connectHTTP(t, endpoint, mcp.LATEST_PROTOCOL_VERSION)
+
+		res := callTool(t, c, "execute_operation", map[string]any{"method": "GET", "path": "/api/v1/applications"})
+		if res.IsError || !strings.Contains(resultText(res), fixtures.DemoApp) {
+			t.Fatalf("listing applications through TLS did not return %q: %s", fixtures.DemoApp, resultText(res))
+		}
+	})
 }
 
 func listTools(t *testing.T, c *client.Client) map[string]mcp.Tool {

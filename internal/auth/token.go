@@ -30,6 +30,9 @@ type TokenOptions struct {
 	// oidc mode its absence is an upstream failure, not something to hand the
 	// client an opaque token for and let it 401 on every ArgoCD call.
 	RequireIDToken bool
+	// TLSInsecure skips certificate verification on the exchange, like the
+	// spec fetch and OIDC discovery do under ARGOCD_TLS_INSECURE.
+	TLSInsecure bool
 }
 
 // HandleToken serves POST /token.
@@ -37,7 +40,7 @@ type TokenOptions struct {
 // Swaps the id_token into the access_token field because ArgoCD validates
 // the id_token (not the access_token) as the Bearer token.
 func HandleToken(opts TokenOptions) http.HandlerFunc {
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := httputil.NewClient(15*time.Second, opts.TLSInsecure)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
