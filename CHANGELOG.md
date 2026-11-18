@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.1](https://github.com/matthisholleville/argocd-mcp/compare/v1.8.0...v1.8.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* set explicit MCP annotations so read-only tools aren't flagged destructive ([9f8c56d](https://github.com/matthisholleville/argocd-mcp/commit/9f8c56dc0a36f4f4ef79e383b66cd060682bca29))
+* set explicit MCP annotations so read-only tools aren't flagged destructive ([d87b550](https://github.com/matthisholleville/argocd-mcp/commit/d87b5501469b4146d50410f0e47513fdbee94b00))
+
+
+### Miscellaneous
+
+* remove inline comments on tool annotations ([e3b53ba](https://github.com/matthisholleville/argocd-mcp/commit/e3b53ba642f11e36b495aae0e2f44b9bd399a756))
+
 ## [1.8.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.7.0...v1.8.0) (2026-08-13)
 
 
