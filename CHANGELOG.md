@@ -6,18 +6,15 @@
 ### Features
 
 * support MCP spec 2026-07-28 (mcp-go v1.5.0) + e2e harness against real ArgoCD ([1fb0280](https://github.com/matthisholleville/argocd-mcp/commit/1fb0280d04caf62de368f4e9fcfb71f9b047c061))
-* support MCP spec 2026-07-28 by bumping mcp-go to v1.5.0 ([f7f0936](https://github.com/matthisholleville/argocd-mcp/commit/f7f0936c392f5e21da2db6ad0eb6d0c3877df414))
 
 
 ### Bug Fixes
 
 * **deps:** move to Go 1.26, update dependencies and actions, add Renovate ([e998f8c](https://github.com/matthisholleville/argocd-mcp/commit/e998f8cf9c902965348d0f8927227e805817877f))
-* **deps:** move to Go 1.26, update dependencies and actions, add Renovate ([b6eb38c](https://github.com/matthisholleville/argocd-mcp/commit/b6eb38c89db56894c674afdf54a2b3247c2b9e09))
 
 
 ### Documentation
 
-* add AGENTS.md (and CLAUDE.md importing it) for AI coding agents ([745fdee](https://github.com/matthisholleville/argocd-mcp/commit/745fdeec1a5d0b75f25be13c1629484af934603e))
 * add AGENTS.md and CLAUDE.md for AI coding agents ([59c9b3c](https://github.com/matthisholleville/argocd-mcp/commit/59c9b3c588018338acb0205cb347f712fe5e46ed))
 * make red/green TDD and e2e coverage mandatory in AGENTS.md ([7897ff8](https://github.com/matthisholleville/argocd-mcp/commit/7897ff84874ef3da4d8324db6f67c0cd939b8398))
 
@@ -25,9 +22,7 @@
 ### Miscellaneous
 
 * **deps:** update go toolchain ([72ba09f](https://github.com/matthisholleville/argocd-mcp/commit/72ba09fe16e80fae0ea062b19ab0364fa332e8da))
-* **deps:** update go toolchain ([5ab796c](https://github.com/matthisholleville/argocd-mcp/commit/5ab796c033cb1aa7673f75b6aa17b9e105cd58f4))
 * **deps:** update helm release ollama to v1.95.0 ([10a0588](https://github.com/matthisholleville/argocd-mcp/commit/10a0588aed7530eb20a91f155232cd8e92efa851))
-* **deps:** update helm release ollama to v1.95.0 ([6c464c9](https://github.com/matthisholleville/argocd-mcp/commit/6c464c9a26a3c9204c14ef84dcddb0649d2fd318))
 * pin golang builder image by digest, log e2e bootstrap step durations ([5d1e609](https://github.com/matthisholleville/argocd-mcp/commit/5d1e6096908ce880e4ef1f4350ea353ff265c445))
 
 ## [1.8.1](https://github.com/matthisholleville/argocd-mcp/compare/v1.8.0...v1.8.1) (2026-11-18)
@@ -36,7 +31,6 @@
 ### Bug Fixes
 
 * set explicit MCP annotations so read-only tools aren't flagged destructive ([9f8c56d](https://github.com/matthisholleville/argocd-mcp/commit/9f8c56dc0a36f4f4ef79e383b66cd060682bca29))
-* set explicit MCP annotations so read-only tools aren't flagged destructive ([d87b550](https://github.com/matthisholleville/argocd-mcp/commit/d87b5501469b4146d50410f0e47513fdbee94b00))
 
 
 ### Miscellaneous
@@ -49,7 +43,6 @@
 ### Features
 
 * expose Prometheus metrics for tool calls ([375a70c](https://github.com/matthisholleville/argocd-mcp/commit/375a70c56ec0da6bde8c660d171fd972bc7821a7))
-* expose Prometheus metrics for tool calls ([870ffa6](https://github.com/matthisholleville/argocd-mcp/commit/870ffa601bae4cd3e53afeeda8fdccf9e1211145))
 
 
 ### Bug Fixes
@@ -63,7 +56,6 @@
 ### Features
 
 * add oidc auth mode for ArgoCD instances without Dex ([ae94414](https://github.com/matthisholleville/argocd-mcp/commit/ae94414fa02db747ca4114812f6f170eb8e692a9))
-* add oidc auth mode for ArgoCD instances without Dex ([788a8a0](https://github.com/matthisholleville/argocd-mcp/commit/788a8a0df397f70fca7ca5ea3976d46e74012f98))
 * terminate the provider callback in oidc mode ([01e3abc](https://github.com/matthisholleville/argocd-mcp/commit/01e3abce8387a68758f66b0173d2be94df260578))
 
 
