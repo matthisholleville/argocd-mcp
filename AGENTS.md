@@ -21,6 +21,7 @@ make test          # go test -race -count=1 ./... (unit tests, no Docker)
 make e2e           # E2E against a real ArgoCD in k3s (requires Docker, ~1-2 min)
 make run           # Build + run with ARGOCD_BASE_URL / ARGOCD_TOKEN from env
 make docker-build  # Build the container image
+./hack/helm-diff.sh origin/main   # Diff of the rendered chart vs a base ref (default + embeddings profiles)
 go vet ./... && go vet -tags e2e ./e2e/...   # What CI's lint job runs
 ```
 
@@ -102,6 +103,7 @@ Any behaviour an MCP client can observe **must** be covered by an e2e test again
 How the harness works:
 
 - `fixtures.RunArgoCD(t)` starts **one shared** k3s container per package (testcontainers-go), installs a pinned ArgoCD version, scales it down to `argocd-server` + redis, seeds the `guestbook` Application (as a CR, never synced) and returns a URL + admin token. `fixtures.CleanupArgoCD()` runs from `TestMain`.
+- `fixtures.RunOllama(t)` starts **one shared** Ollama container (image pinned to the ollama subchart's `appVersion`) and pulls `nomic-embed-text`, the production embeddings model. Use it for anything touching `EMBEDDINGS_ENABLED` / vector search. `fixtures.CleanupOllama()` runs from `TestMain`.
 - `TestMain` builds the real `argocd-mcp` binary; tests start it with their own env (`startHTTPServer`, `connectStdio`) and drive it with the mcp-go client, pinning the protocol version (`client.WithProtocolVersion`).
 - Cover both protocol generations: `2025-11-25` (initialize handshake) and `2026-07-28` (stateless).
 - `e2e` is a **required status check on `main`**.
@@ -116,9 +118,16 @@ How the harness works:
 - **Go version is pinned in four places**: `go.mod` (`go` directive), `Dockerfile` (`golang:<ver>-alpine@sha256:…`), and `go-version` in `.github/workflows/ci.yml` and `release.yml`. Renovate updates them together in its "Go toolchain" group. If you change one by hand, change all of them.
 - **The builder image sets `GOTOOLCHAIN=local`**: its Go must be ≥ the `go.mod` directive, or `docker build` fails.
 - **testcontainers-go and Go versions**: a testcontainers release can raise the minimum Go version for the whole module. Check `go.mod` after bumping it.
+- **Ollama version lives in two places**: the subchart version in `charts/argocd-mcp/Chart.yaml` (which pins the Ollama image) and `ollamaImage` in `e2e/fixtures/ollama.go`. When the chart is bumped, set `ollamaImage` to the new chart `appVersion` (the helm-diff PR comment shows it) so e2e tests what ships.
+- **Small embedding models don't fit the ArgoCD spec**: some endpoint descriptions exceed 256 tokens, so models like `all-minilm` fail at indexing (Ollama returns 500). Keep `nomic-embed-text` in tests.
 - **e2e code only compiles with `-tags e2e`**: plain `go build ./...` / `go vet ./...` skip it, and so do gopls diagnostics unless the tag is configured.
 - **Stdio transport and contexts**: the mcp-go stdio transport ties the subprocess to the context passed to `Start`. Pass a long-lived context (`t.Context()` in tests), not a short timeout.
 - **mcp-go protocol eras**: since v1.x the server serves both the legacy handshake and the stateless 2026-07-28 core on the same endpoint. Don't add logic that depends on `initialize` having happened (hooks, session state).
+
+## Helm chart
+
+- CI lints the chart with the default values **and** with `embeddings.enabled=true` (otherwise the ollama subchart is never rendered).
+- On every PR, the `helm-diff` job renders the chart on the base branch and on the PR (`hack/helm-diff.sh`) and posts the manifest diff as a sticky PR comment. The comment is removed when the rendered chart is unchanged. Review it for any chart or subchart change.
 
 ## Commits and Releases
 
