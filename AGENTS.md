@@ -131,6 +131,7 @@ How the harness works:
 
 ## Commits and Releases
 
+- PRs are **squash-merged only** (repo setting): the **PR title becomes the commit message**, with an empty body. The PR title must therefore be a Conventional Commit; intermediate commits on the branch don't reach `main`.
 - **Conventional Commits** are required: release-please derives versions and the changelog from them. `feat:` → minor, `fix:` → patch, `chore:`/`test:`/`docs:` → no release. Use `fix(deps):` when a dependency or toolchain update changes the shipped binary or image.
 - PRs target `main`; dependency updates come from Renovate (`renovate.json`): minor/patch/digest are automerged when CI is green, while the Go toolchain and Helm chart dependencies need review.
 
