@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.9.0...v1.10.0) (2026-11-18)
+
+
+### Features
+
+* add ARGOCD_CA_BUNDLE and chart extraEnv/extraVolumes/extraVolumeMounts ([#30](https://github.com/matthisholleville/argocd-mcp/issues/30)) ([31109e5](https://github.com/matthisholleville/argocd-mcp/commit/31109e54b7c71ee697ed087efc5d5d1f4d4c2f79))
+
+
+### Bug Fixes
+
+* honor ARGOCD_TLS_INSECURE and HTTP(S)_PROXY on every outbound HTTP client ([#28](https://github.com/matthisholleville/argocd-mcp/issues/28)) ([4862573](https://github.com/matthisholleville/argocd-mcp/commit/48625730f57a583116d9f065c20ed8dc94e92bd5))
+
+
+### Documentation
+
+* remove duplicated changelog entries (1.7.0 → 1.9.0) ([#27](https://github.com/matthisholleville/argocd-mcp/issues/27)) ([5eb628f](https://github.com/matthisholleville/argocd-mcp/commit/5eb628fd590fca2e6c0651230f0d21ba31f75967))
+
 ## [1.9.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.8.1...v1.9.0) (2026-11-18)
 
 
