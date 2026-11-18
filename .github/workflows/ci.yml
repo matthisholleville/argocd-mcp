@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27.4"
 
       - name: Build
         run: go build ./...
@@ -33,7 +33,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27.4"
 
       - name: Vet
         run: go vet ./...
@@ -45,7 +45,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"
+          go-version: "1.27.4"
 
       - name: E2E (k3s + ArgoCD)
         run: make e2e
