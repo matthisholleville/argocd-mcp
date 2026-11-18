@@ -57,7 +57,6 @@ func searchTool(opts ToolOptions) mcp.Tool {
 		mcp.WithString("query",
 			mcp.Description("Search query (e.g. 'sync application', 'get logs', 'list projects')"),
 		),
-		// Searches the local endpoint index only: no ArgoCD call, no side effect.
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -94,8 +93,6 @@ func executeTool(opts ToolOptions) mcp.Tool {
 		mcp.WithString("body",
 			mcp.Description("JSON request body as a string (optional, for POST/PUT/PATCH)"),
 		),
-		// Can issue DELETE unless writes are disabled, in which case only
-		// GET/HEAD/OPTIONS get through.
 		mcp.WithReadOnlyHintAnnotation(opts.DisableWrite),
 		mcp.WithDestructiveHintAnnotation(!opts.DisableWrite),
 		mcp.WithIdempotentHintAnnotation(opts.DisableWrite),
