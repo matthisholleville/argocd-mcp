@@ -232,6 +232,8 @@ func annotationsForMethod(method string) []mcp.ToolOption {
 	case "GET", "HEAD", "OPTIONS":
 		return []mcp.ToolOption{
 			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
 			mcp.WithOpenWorldHintAnnotation(true),
 		}
 	case "DELETE":

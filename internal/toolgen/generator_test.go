@@ -647,6 +647,12 @@ func TestAnnotations_GetIsReadOnly(t *testing.T) {
 	if ann.ReadOnlyHint == nil || *ann.ReadOnlyHint != true {
 		t.Error("GET tool should have readOnlyHint=true")
 	}
+	if ann.DestructiveHint == nil || *ann.DestructiveHint != false {
+		t.Error("GET tool should have destructiveHint=false")
+	}
+	if ann.IdempotentHint == nil || *ann.IdempotentHint != true {
+		t.Error("GET tool should have idempotentHint=true")
+	}
 }
 
 func TestAnnotations_DeleteIsDestructive(t *testing.T) {
