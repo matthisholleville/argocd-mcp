@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.10.0...v1.11.0) (2026-11-19)
+
+
+### Features
+
+* rank keyword search by operation name and term rarity, add max_results ([#31](https://github.com/matthisholleville/argocd-mcp/issues/31)) ([eeb6fd4](https://github.com/matthisholleville/argocd-mcp/commit/eeb6fd427ee671b13dffe12150441ef9c4eb0b83))
+
 ## [1.10.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.9.0...v1.10.0) (2026-11-18)
 
 
