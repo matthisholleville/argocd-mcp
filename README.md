@@ -54,6 +54,8 @@ graph TD
     E -->|LLM calls API| G[Proxies to ArgoCD with user token]
 ```
 
+Without embeddings, `search_operations` ranks endpoints locally: each keyword scores on its own, a match on the operation name (operationId, path segments) weighs most, then the summary, parameters and description, and rare words count more than common ones (`get logs` → `PodLogs`, not every `Get*`). `+word` requires a word (`+cluster list`), and an exact operationId or path (`ApplicationService_Sync`) returns that operation. It returns 10 endpoints by default; the LLM can set `max_results` (up to 20).
+
 ### Generated mode (`TOOL_MODE=generated`)
 
 One typed MCP tool per endpoint, generated dynamically at startup. The LLM calls `argocd_application_sync(name, revision)` directly — no search step, no path construction.
