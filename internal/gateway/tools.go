@@ -16,6 +16,11 @@ import (
 	"github.com/matthisholleville/argocd-mcp/internal/ratelimit"
 )
 
+const (
+	defaultSearchResults = 10
+	maxSearchResults     = 20
+)
+
 // Searcher abstracts the search backend (keyword or vector).
 type Searcher interface {
 	Search(ctx context.Context, query string, maxResults int) ([]openapi.Endpoint, error)
@@ -40,7 +45,8 @@ func RegisterMCPTools(srv *server.MCPServer, opts ToolOptions, searcher Searcher
 func searchTool(opts ToolOptions) mcp.Tool {
 	desc := fmt.Sprintf(
 		"Search the ArgoCD API (%d endpoints). "+
-			"Returns matching endpoints with method, path, summary, and parameters. "+
+			"Returns the best matching endpoints first, with method, path, summary, and parameters; "+
+			"the operation name weighs most. "+
 			"Use this to discover which API calls are available before executing them.",
 		opts.EndpointCount,
 	)
@@ -55,7 +61,12 @@ func searchTool(opts ToolOptions) mcp.Tool {
 		"search_operations",
 		mcp.WithDescription(desc),
 		mcp.WithString("query",
-			mcp.Description("Search query (e.g. 'sync application', 'get logs', 'list projects')"),
+			mcp.Description("Keywords (e.g. 'sync application', 'pod logs', 'list projects'). "+
+				"Prefix a word with + to require it ('+cluster list'). "+
+				"An operationId or a path (e.g. 'ApplicationService_Sync') returns that operation."),
+		),
+		mcp.WithNumber("max_results",
+			mcp.Description(fmt.Sprintf("Maximum number of endpoints to return (default %d, at most %d).", defaultSearchResults, maxSearchResults)),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -105,7 +116,9 @@ func handleSearch(searcher Searcher, auditor *audit.Logger, mtx *metrics.Collect
 		query := req.GetString("query", "")
 		start := time.Now()
 
-		results, err := searcher.Search(ctx, query, 20)
+		maxResults := min(max(req.GetInt("max_results", defaultSearchResults), 1), maxSearchResults)
+
+		results, err := searcher.Search(ctx, query, maxResults)
 		duration := time.Since(start)
 
 		if auditor != nil {

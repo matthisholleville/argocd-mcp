@@ -121,6 +121,7 @@ How the harness works:
 - **The builder image sets `GOTOOLCHAIN=local`**: its Go must be ≥ the `go.mod` directive, or `docker build` fails.
 - **testcontainers-go and Go versions**: a testcontainers release can raise the minimum Go version for the whole module. Check `go.mod` after bumping it.
 - **Ollama version lives in two places**: the subchart version in `charts/argocd-mcp/Chart.yaml` (which pins the Ollama image) and `ollamaImage` in `e2e/fixtures/ollama.go`. When the chart is bumped, set `ollamaImage` to the new chart `appVersion` (the helm-diff PR comment shows it) so e2e tests what ships.
+- **The ranking corpus uses a copy of ArgoCD's swagger** (`internal/openapi/testdata/argocd-swagger.json`, same version as `argoCDVersion` in `e2e/fixtures/argocd.go`). When bumping ArgoCD, refresh it from `https://raw.githubusercontent.com/argoproj/argo-cd/<version>/assets/swagger.json`.
 - **Small embedding models don't fit the ArgoCD spec**: some endpoint descriptions exceed 256 tokens, so models like `all-minilm` fail at indexing (Ollama returns 500). Keep `nomic-embed-text` in tests.
 - **e2e code only compiles with `-tags e2e`**: plain `go build ./...` / `go vet ./...` skip it, and so do gopls diagnostics unless the tag is configured.
 - **Stdio transport and contexts**: the mcp-go stdio transport ties the subprocess to the context passed to `Start`. Pass a long-lived context (`t.Context()` in tests), not a short timeout.
@@ -142,5 +143,6 @@ How the harness works:
 
 - **New configuration option**: failing test in `config_test.go` (+ e2e case for its effect) → field + doc comment in `internal/config/config.go` → parse/validate in `Load` → wire in `internal/server/server.go` → document in `README.md` → expose in the chart (`charts/argocd-mcp/values.yaml` + env in `templates/deployment.yaml`).
 - **New tool or tool behaviour (search mode)**: failing unit test in `internal/gateway/tools_test.go` + failing e2e case in `e2e/argocd_test.go` → implement in `internal/gateway/tools.go` (definition + annotations + handler) → both green.
+- **Keyword search ranking change**: add the failing query to `retrievalCases` in `internal/openapi/search_ranking_test.go` (every case must rank in the top 5 against the real ArgoCD spec in `internal/openapi/testdata/argocd-swagger.json`) + an e2e case in `TestKeywordSearchRanking` → tune `internal/openapi/search.go` → all cases green. Don't add a case that has no lexical signal in the spec (synonyms are what vector search is for).
 - **Generated-mode change**: failing tests in `internal/toolgen/generator_test.go` + e2e case → implement in `internal/toolgen/` → green.
 - **Auth change**: failing regression test first (see `proxy_regression_test.go`) → change `internal/auth/` → green; redirect and state validation are security-sensitive.

@@ -110,6 +110,53 @@ func TestGeneratedMode(t *testing.T) {
 	}
 }
 
+func TestKeywordSearchRanking(t *testing.T) {
+	argo := fixtures.RunArgoCD(t)
+	c := connectHTTP(t, startHTTPServer(t, serverEnv(argo)), mcp.LATEST_PROTOCOL_VERSION)
+
+	tests := []struct {
+		args map[string]any
+		top  []string
+		size int
+	}{
+		{map[string]any{"query": "delete application"}, []string{"ApplicationService_Delete"}, 10},
+		{map[string]any{"query": "get logs"}, []string{"ApplicationService_PodLogs", "ApplicationService_PodLogs2"}, 10},
+		{map[string]any{"query": "rollback application", "max_results": 3}, []string{"ApplicationService_Rollback"}, 3},
+		{map[string]any{"query": "+cluster list"}, []string{"ClusterService_List"}, 0},
+		{map[string]any{"query": "ApplicationService_Sync"}, []string{"ApplicationService_Sync"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.args["query"].(string), func(t *testing.T) {
+			hits := searchOperationIDs(t, c, tt.args)
+			if len(hits) == 0 || !slices.Contains(tt.top, hits[0]) {
+				t.Fatalf("top result not in %v, got %v", tt.top, hits)
+			}
+			if tt.size > 0 && len(hits) != tt.size {
+				t.Errorf("got %d results, want %d: %v", len(hits), tt.size, hits)
+			}
+		})
+	}
+}
+
+func searchOperationIDs(t *testing.T, c *client.Client, args map[string]any) []string {
+	t.Helper()
+	res := callTool(t, c, "search_operations", args)
+	if res.IsError {
+		t.Fatalf("search failed: %s", resultText(res))
+	}
+	var hits []struct {
+		OperationID string `json:"operation_id"`
+	}
+	if err := json.Unmarshal([]byte(resultText(res)), &hits); err != nil {
+		t.Fatalf("decode search results: %v: %s", err, resultText(res))
+	}
+	ids := make([]string, len(hits))
+	for i, h := range hits {
+		ids[i] = h.OperationID
+	}
+	return ids
+}
+
 func TestVectorSearch(t *testing.T) {
 	argo := fixtures.RunArgoCD(t)
 	ollama := fixtures.RunOllama(t)

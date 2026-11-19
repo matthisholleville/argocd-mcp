@@ -474,3 +474,41 @@ func TestHandleExecute_RateLimitBlocks(t *testing.T) {
 		t.Errorf("expected rate limit error, got: %s", text)
 	}
 }
+
+type recordingSearcher struct{ maxResults int }
+
+func (s *recordingSearcher) Search(_ context.Context, _ string, maxResults int) ([]openapi.Endpoint, error) {
+	s.maxResults = maxResults
+	return nil, nil
+}
+
+func TestHandleSearch_MaxResults(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want int
+	}{
+		{"default", map[string]any{"query": "sync"}, 10},
+		{"requested", map[string]any{"query": "sync", "max_results": 3}, 3},
+		{"capped", map[string]any{"query": "sync", "max_results": 500}, 20},
+		{"floored", map[string]any{"query": "sync", "max_results": 0}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &recordingSearcher{}
+			if _, err := handleSearch(s, nil, nil)(context.Background(), buildCallToolRequest(t, tt.args)); err != nil {
+				t.Fatal(err)
+			}
+			if s.maxResults != tt.want {
+				t.Errorf("searcher got maxResults=%d, want %d", s.maxResults, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchTool_DeclaresMaxResults(t *testing.T) {
+	tool := searchTool(ToolOptions{EndpointCount: 106})
+	if _, ok := tool.InputSchema.Properties["max_results"]; !ok {
+		t.Fatalf("max_results not declared, got %v", tool.InputSchema.Properties)
+	}
+}
