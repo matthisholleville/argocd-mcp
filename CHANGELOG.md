@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/matthisholleville/argocd-mcp/compare/v1.11.0...v1.11.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/mark3labs/mcp-go to v1.6.0 ([#33](https://github.com/matthisholleville/argocd-mcp/issues/33)) ([6255c7f](https://github.com/matthisholleville/argocd-mcp/commit/6255c7fc9e33196d17bf4a2548c317d193344915))
+
 ## [1.11.0](https://github.com/matthisholleville/argocd-mcp/compare/v1.10.0...v1.11.0) (2026-11-19)
 
 
