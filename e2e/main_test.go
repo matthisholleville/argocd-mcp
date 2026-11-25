@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,27 @@ func serverEnv(argo *fixtures.ArgoCD, extra ...string) []string {
 }
 
 func startHTTPServer(t *testing.T, env []string) string {
+	t.Helper()
+	endpoint := launchHTTPServer(t, env)
+	readyz := strings.TrimSuffix(endpoint, "/mcp") + "/readyz"
+
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		resp, err := http.Get(readyz)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return endpoint
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("argocd-mcp did not become ready on %s", readyz)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func launchHTTPServer(t *testing.T, env []string) string {
 	t.Helper()
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")

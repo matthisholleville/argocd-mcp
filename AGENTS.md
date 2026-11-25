@@ -106,7 +106,7 @@ How the harness works:
 
 - `fixtures.RunArgoCD(t)` starts **one shared** k3s container per package (testcontainers-go), installs a pinned ArgoCD version, scales it down to `argocd-server` + redis, seeds the `guestbook` Application (as a CR, never synced) and returns a URL + admin token. `fixtures.CleanupArgoCD()` runs from `TestMain`.
 - `fixtures.RunOllama(t)` starts **one shared** Ollama container (image pinned to the ollama subchart's `appVersion`) and pulls `nomic-embed-text`, the production embeddings model. Use it for anything touching `EMBEDDINGS_ENABLED` / vector search. `fixtures.CleanupOllama()` runs from `TestMain`.
-- `TestMain` builds the real `argocd-mcp` binary; tests start it with their own env (`startHTTPServer`, `connectStdio`) and drive it with the mcp-go client, pinning the protocol version (`client.WithProtocolVersion`).
+- `TestMain` builds the real `argocd-mcp` binary; tests start it with their own env (`startHTTPServer` waits for `/readyz`, `launchHTTPServer` only for the port; `connectStdio`) and drive it with the mcp-go client, pinning the protocol version (`client.WithProtocolVersion`).
 - Cover both protocol generations: `2025-11-25` (initialize handshake) and `2026-07-28` (stateless).
 - `e2e` is a **required status check on `main`**.
 
@@ -125,6 +125,7 @@ How the harness works:
 - **Small embedding models don't fit the ArgoCD spec**: some endpoint descriptions exceed 256 tokens, so models like `all-minilm` fail at indexing (Ollama returns 500). Keep `nomic-embed-text` in tests.
 - **e2e code only compiles with `-tags e2e`**: plain `go build ./...` / `go vet ./...` skip it, and so do gopls diagnostics unless the tag is configured.
 - **Stdio transport and contexts**: the mcp-go stdio transport ties the subprocess to the context passed to `Start`. Pass a long-lived context (`t.Context()` in tests), not a short timeout.
+- **HTTP listens before startup finishes**: in `MCP_TRANSPORT=http`, the port opens first; `/healthz` is 200 right away (liveness), while `/readyz`, `/mcp` and the OAuth routes answer 503 until the spec, the search index and the OAuth proxy are ready. Anything slow at startup goes before `front.setApp`, never after.
 - **mcp-go protocol eras**: since v1.x the server serves both the legacy handshake and the stateless 2026-07-28 core on the same endpoint. Don't add logic that depends on `initialize` having happened (hooks, session state).
 
 ## Helm chart
