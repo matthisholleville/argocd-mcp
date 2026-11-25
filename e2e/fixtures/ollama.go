@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	ollamaImage = "ollama/ollama:0.40.14"
+	ollamaImage = "ollama/ollama:0.40.17"
 	ollamaPort  = "11434/tcp"
 
 	EmbeddingsModel = "nomic-embed-text"
