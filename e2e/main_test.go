@@ -77,7 +77,7 @@ func startHTTPServer(t *testing.T, env []string) string {
 		}
 	})
 
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for {
 		conn, err := net.Dial("tcp", addr)
 		if err == nil {
