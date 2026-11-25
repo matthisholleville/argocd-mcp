@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,6 +39,18 @@ func Run(cfg *config.Config, version string) error {
 	// Server-wide context tied to SIGTERM/SIGINT for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Listen before the slow part of startup (spec fetch, vector indexing,
+	// OIDC discovery) so the liveness probe passes while /readyz and /mcp
+	// answer 503 until everything is wired.
+	var front *frontend
+	var httpServer *http.Server
+	var httpErr <-chan error
+	if cfg.Transport == "http" {
+		front = newFrontend()
+		httpServer, httpErr = listen(cfg.Addr, front, logger)
+		defer httpServer.Close()
+	}
 
 	// 1. Fetch and parse ArgoCD OpenAPI spec.
 	if cfg.TLSInsecure {
@@ -179,7 +192,7 @@ func Run(cfg *config.Config, version string) error {
 	// 6. Start.
 	switch cfg.Transport {
 	case "http":
-		return runHTTP(ctx, mcpServer, cfg, proxy, logger)
+		return runHTTP(ctx, httpServer, httpErr, front, mcpServer, cfg, proxy, logger)
 	default:
 		return runStdio(mcpServer, logger)
 	}
@@ -220,38 +233,65 @@ func runStdio(s *server.MCPServer, logger *slog.Logger) error {
 	return server.ServeStdio(s)
 }
 
-func runHTTP(ctx context.Context, s *server.MCPServer, cfg *config.Config, proxy *oauthProxy, logger *slog.Logger) error {
+type frontend struct {
+	mux *http.ServeMux
+	app atomic.Pointer[http.Handler]
+}
+
+func newFrontend() *frontend {
+	f := &frontend{mux: http.NewServeMux()}
+	f.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	f.mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if f.app.Load() == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	f.mux.Handle("GET /metrics", promhttp.Handler())
+	f.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		app := f.app.Load()
+		if app == nil {
+			http.Error(w, "argocd-mcp is starting", http.StatusServiceUnavailable)
+			return
+		}
+		(*app).ServeHTTP(w, r)
+	})
+	return f
+}
+
+func (f *frontend) ServeHTTP(w http.ResponseWriter, r *http.Request) { f.mux.ServeHTTP(w, r) }
+
+func (f *frontend) setApp(h http.Handler) { f.app.Store(&h) }
+
+func listen(addr string, h http.Handler, logger *slog.Logger) (*http.Server, <-chan error) {
+	httpServer := &http.Server{Addr: addr, Handler: h}
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info("starting HTTP transport", slog.String("addr", addr))
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+	return httpServer, errCh
+}
+
+func runHTTP(ctx context.Context, httpServer *http.Server, errCh <-chan error, front *frontend, s *server.MCPServer, cfg *config.Config, proxy *oauthProxy, logger *slog.Logger) error {
 	httpSrv := server.NewStreamableHTTPServer(s,
 		server.WithStateLess(true),
 		server.WithEndpointPath("/mcp"),
 	)
 
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.Handle("GET /metrics", promhttp.Handler())
-
 	if proxy != nil {
 		mountOAuthProxy(mux, httpSrv, cfg, logger, proxy)
 	} else {
 		mux.Handle("/mcp", httpSrv)
 		logger.Info("token mode — /mcp is unauthenticated, using static ARGOCD_TOKEN")
 	}
-
-	httpServer := &http.Server{Addr: cfg.Addr, Handler: mux}
-
-	errCh := make(chan error, 1)
-	go func() {
-		logger.Info("starting HTTP transport", slog.String("addr", cfg.Addr))
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
+	front.setApp(mux)
 
 	select {
 	case <-ctx.Done():

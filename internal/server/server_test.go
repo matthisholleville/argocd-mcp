@@ -48,3 +48,37 @@ func TestResolveOAuthProxy_ForwardsTLSConfigToTokenExchange(t *testing.T) {
 		})
 	}
 }
+
+func TestFrontend_NotReadyUntilAppIsSet(t *testing.T) {
+	f := newFrontend()
+
+	status := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		f.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		return rec.Code
+	}
+
+	tests := []struct {
+		method, path string
+		starting     int
+		ready        int
+	}{
+		{http.MethodGet, "/healthz", http.StatusOK, http.StatusOK},
+		{http.MethodGet, "/readyz", http.StatusServiceUnavailable, http.StatusOK},
+		{http.MethodPost, "/mcp", http.StatusServiceUnavailable, http.StatusTeapot},
+		{http.MethodGet, "/.well-known/oauth-authorization-server", http.StatusServiceUnavailable, http.StatusTeapot},
+	}
+	for _, tt := range tests {
+		if got := status(tt.method, tt.path); got != tt.starting {
+			t.Errorf("starting: %s %s = %d, want %d", tt.method, tt.path, got, tt.starting)
+		}
+	}
+
+	f.setApp(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }))
+
+	for _, tt := range tests {
+		if got := status(tt.method, tt.path); got != tt.ready {
+			t.Errorf("ready: %s %s = %d, want %d", tt.method, tt.path, got, tt.ready)
+		}
+	}
+}
